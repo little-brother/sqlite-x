@@ -1,0 +1,7 @@
+out/
+*.sqlite
+*.db
+resource.res
+sqlite-x.ini
+*.bat
+*.exe
