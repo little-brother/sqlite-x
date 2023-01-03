@@ -54,9 +54,15 @@
 #define IDM_BLOB               5020
 #define IDM_ADD_ROW            5021
 #define IDM_DELETE_ROW         5022
-#define IDM_ABOUT              5025
 #define IDM_SEPARATOR1         5030
 #define IDM_SEPARATOR2         5031
+
+#define IDM_OPEN_DB            5130
+#define IDM_EXIT               5131
+#define IDM_RECENT             5140
+#define IDM_ABOUT              5165
+#define IDM_HOMEPAGE           5166
+#define IDM_WIKI               5167
 
 #define IDI_ICON               6000
 
@@ -73,9 +79,10 @@
 #define MAX_COLUMN_LENGTH      2000
 #define MAX_TABLE_LENGTH       2000
 #define BLOB_VALUE             "(BLOB)"
+#define MAX_RECENT_FILES       10 
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("0.9.5")
+#define APP_VERSION            TEXT("0.9.6")
 #ifdef __MINGW64__
 #define APP_PLATFORM               64
 #else
@@ -93,6 +100,7 @@ LRESULT CALLBACK cbNewHeader(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK cbNewFilterEdit (HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK cbNewCellEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+void updateRecentList(HWND hWnd);
 
 void bindValue(sqlite3_stmt* stmt, int i, const char* value8);
 void bindFilterValues(HWND hHeader, sqlite3_stmt* stmt);
@@ -115,64 +123,69 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	WNDCLASS wc = {0};
 	wc.lpfnWndProc = cbMainWnd;
 	wc.hInstance = hInstance;
+	wc.hCursor = LoadCursor (NULL, IDC_ARROW);
 	wc.lpszClassName = TEXT("sqlite-x-class");	
+	wc.hbrBackground = (HBRUSH) GetSysColorBrush(COLOR_APPWORKSPACE);
+	wc.style = CS_DBLCLKS;
 	RegisterClass(&wc);
-	
-	HWND hWnd = CreateWindowEx(0, TEXT("sqlite-x-class"), NULL, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, NULL, hInstance, NULL);
+
+	HMENU hFileMenu = CreatePopupMenu();
+	AppendMenu(hFileMenu, MF_STRING, IDM_OPEN_DB, TEXT("Open..."));
+	AppendMenu(hFileMenu, MF_STRING, IDM_SEPARATOR1, NULL);
+	AppendMenu(hFileMenu, MF_STRING, IDM_EXIT, TEXT("Exit"));
+
+	HMENU hAboutMenu = CreatePopupMenu();
+	AppendMenu(hAboutMenu, MF_STRING, IDM_ABOUT, TEXT("About"));
+	AppendMenu(hAboutMenu, MF_STRING, IDM_WIKI, TEXT("Wiki"));
+	AppendMenu(hAboutMenu, MF_STRING, IDM_HOMEPAGE, TEXT("Homepage"));		
+
+	HMENU hMainMenu = CreateMenu();
+	AppendMenu(hMainMenu, MF_STRING | MF_POPUP, (UINT_PTR)hFileMenu, TEXT("Database"));
+	AppendMenu(hMainMenu, MF_STRING | MF_POPUP, (UINT_PTR)hAboutMenu, TEXT("?"));
+	ModifyMenu(hMainMenu, 1, MF_BYPOSITION | MFT_RIGHTJUSTIFY, 0, TEXT("?"));	
+
+	HWND hWnd = CreateWindowEx(0, TEXT("sqlite-x-class"), TEXT("sqlite-x - No database selected"), WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, NULL, hMainMenu, hInstance, NULL);
 	
 	if (hWnd == NULL)
 		return 0;
+		
+	INITCOMMONCONTROLSEX icex;
+	icex.dwSize = sizeof(icex);
+	icex.dwICC = ICC_LISTVIEW_CLASSES;
+	InitCommonControlsEx(&icex);
 	
+	setlocale(LC_CTYPE, "");		
+		
 	TCHAR buf16[MAX_PATH];	
 	GetModuleFileName(0, buf16, MAX_PATH);
 	PathRemoveFileSpec(buf16);
 	_sntprintf(iniPath, MAX_PATH, TEXT("%ls/%ls.ini"), buf16, APP_NAME);
 	
-	TCHAR path16[MAX_PATH + 1] = {0};	
-	
 	int nArgs = 0;
 	TCHAR** args = CommandLineToArgvW(GetCommandLine(), &nArgs);		
-	
-	if (nArgs < 2) {
-		OPENFILENAME ofn = {0};
-		ofn.lStructSize = sizeof(ofn);
-		ofn.hwndOwner = hWnd;
-		ofn.lpstrFile = path16;
-		ofn.lpstrFile[0] = '\0';
-		ofn.nMaxFile = MAX_PATH;
-		ofn.lpstrFilter = TEXT("Databases (*.sqlite, *.sqlite3, *.db, *.db3)\0*.sqlite;*.sqlite3;*.db;*.db3\0All\0*.*\0");
-		ofn.nFilterIndex = 1;
-		ofn.lpstrFileTitle = NULL;
-		ofn.nMaxFileTitle = 0;
-		ofn.lpstrInitialDir = NULL;
-		ofn.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
-	
-		if (!GetOpenFileName(&ofn))
-			return 0;
-	} else {
+		
+	if (nArgs > 1) {
+		TCHAR path16[MAX_PATH + 1] = {0};	
 		_tcsncpy(path16, args[1], MAX_PATH);
+		if (!ListLoadW (hWnd, path16, 0))
+			return 0;
 	}
-
-	TCHAR ext16[32] = {0};
-	_tsplitpath(path16, NULL, NULL, NULL, ext16);
-	if (_tcslen(ext16) == 0)
-		_tcscat(path16, TEXT(".sqlite"));		
-	
-	if (!ListLoadW (hWnd, path16, 0))
-		return 0;
 
 	HICON hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_ICON));
 	SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hIcon);
-	
-	SetWindowText(hWnd, path16);
+
 	SetWindowPos(hWnd, 0, 
 		getStoredValue(TEXT("position-x"), 200),
 		getStoredValue(TEXT("position-y"), 200),
 		getStoredValue(TEXT("width"), 800),
 		getStoredValue(TEXT("height"), 600),
-		SWP_NOZORDER);
+		SWP_NOZORDER);	
 	ShowWindow(hWnd, nCmdShow);
 	SendMessage(hWnd, WM_SIZE, 0, 0);
+	updateRecentList(hWnd);
+	
+	if (nArgs < 2 && getStoredValue(TEXT("open-last-db"), 1))
+		SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDM_RECENT, 0), 0);
 	
 	MSG msg = {};
 	while (GetMessage(&msg, NULL, 0, 0) > 0) {
@@ -184,10 +197,11 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 }
 
 LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
-	switch (uMsg)
-	{
+	switch (uMsg) {		
 		case WM_DESTROY: {
-			ListCloseWindow(GetDlgItem(hWnd, IDC_MAIN));
+			HWND hMainWnd = GetDlgItem(hWnd, IDC_MAIN);			
+			if (hMainWnd)
+				ListCloseWindow(hMainWnd);
 			
 			RECT rc;
 			GetWindowRect(hWnd, &rc);
@@ -203,14 +217,133 @@ LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 		
 		case WM_SIZE: {
 			RECT rc;
-			GetClientRect(hWnd, &rc);
+			GetClientRect(hWnd, &rc);			
 			HWND hMainWnd = GetDlgItem(hWnd, IDC_MAIN);
-			SetWindowPos(hMainWnd, 0, 0, 0, rc.right, rc.bottom, SWP_NOMOVE | SWP_NOZORDER);
+			if (hMainWnd)
+				SetWindowPos(hMainWnd, 0, 0, 0, rc.right, rc.bottom, SWP_NOMOVE | SWP_NOZORDER);
+		}
+		break;
+		
+		case WM_KEYDOWN: {
+			if (wParam == VK_ESCAPE && getStoredValue(TEXT("exit-by-escape"), 1)) {
+				SendMessage(hWnd, WM_DESTROY, 0, 0);
+				return TRUE;
+			}			
+		}
+		break;		
+		
+		case WM_COMMAND: {
+			WORD cmd = LOWORD(wParam);
+			if (cmd == IDM_ABOUT) {
+				OSVERSIONINFO vi = {0};
+				vi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
+
+				NTSTATUS (WINAPI *pRtlGetVersion)(PRTL_OSVERSIONINFOW lpVersionInformation) = NULL;
+				HINSTANCE hNTdllDll = LoadLibrary(TEXT("ntdll.dll"));
+
+				if (hNTdllDll != NULL) {
+					pRtlGetVersion = (NTSTATUS (WINAPI *)(PRTL_OSVERSIONINFOW))
+					GetProcAddress (hNTdllDll, "RtlGetVersion");
+
+					if (pRtlGetVersion != NULL)
+						pRtlGetVersion((PRTL_OSVERSIONINFOW)&vi);
+
+					FreeLibrary(hNTdllDll);
+				}
+
+				if (pRtlGetVersion == NULL)
+					GetVersionEx(&vi);
+
+				BOOL isWin64 = FALSE;
+				#if defined(_WIN64)
+					isWin64 = TRUE;
+				#else
+					isWin64 = IsWow64Process(GetCurrentProcess(), &isWin64) && isWin64;
+				#endif
+
+				TCHAR buf[1024];
+				_sntprintf(buf, 1023, TEXT("GUI version: %ls\nArchitecture: %ls\nSQLite version: %hs\nBuild date: %ls\n\nOS: %i.%i.%i %ls %ls"),
+					APP_VERSION,
+					APP_PLATFORM == 32 ? TEXT("x86") : TEXT("x86-64"),
+					sqlite3_libversion(),
+					TEXT(__DATE__),
+					vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber, vi.szCSDVersion,
+					isWin64 ? TEXT("x64") : TEXT("x32")
+				);
+
+				MessageBox(hWnd, buf, APP_NAME, MB_OK);		
+			}
+			
+			if (cmd == IDM_HOMEPAGE)
+				ShellExecute(0, 0, TEXT("https://github.com/little-brother/sqlite-x"), 0, 0 , SW_SHOW);
+				
+			if (cmd == IDM_WIKI)
+				ShellExecute(0, 0, TEXT("https://github.com/little-brother/sqlite-x/wiki"), 0, 0 , SW_SHOW);	
+			
+			if (cmd == IDM_OPEN_DB) {
+				TCHAR path16[MAX_PATH];
+				
+				OPENFILENAME ofn = {0};
+				ofn.lStructSize = sizeof(ofn);
+				ofn.hwndOwner = hWnd;
+				ofn.lpstrFile = path16;
+				ofn.lpstrFile[0] = '\0';
+				ofn.nMaxFile = MAX_PATH;
+				ofn.lpstrFilter = TEXT("Databases (*.sqlite, *.sqlite3, *.db, *.db3)\0*.sqlite;*.sqlite3;*.db;*.db3\0All\0*.*\0");
+				ofn.nFilterIndex = 1;
+				ofn.lpstrFileTitle = NULL;
+				ofn.nMaxFileTitle = 0;
+				ofn.lpstrInitialDir = NULL;
+				ofn.Flags = OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+			
+				if (!GetOpenFileName(&ofn))
+					return 0;
+					
+				TCHAR ext16[32] = {0};
+				_tsplitpath(path16, NULL, NULL, NULL, ext16);
+				if (_tcslen(ext16) == 0)
+					_tcscat(path16, TEXT(".sqlite"));			
+					
+				ListLoadW (hWnd, path16, 0);
+			}
+			
+			if (cmd == IDM_EXIT) {
+				SendMessage(hWnd, WM_CLOSE, 0, 0);
+			}
+			
+			if (cmd >= IDM_RECENT && cmd < IDM_RECENT + MAX_RECENT_FILES) {
+				TCHAR path16[MAX_PATH + 1];
+				GetMenuString(GetSubMenu(GetMenu(hWnd), 0), cmd, path16, MAX_PATH, MF_BYCOMMAND);
+				ListLoadW (hWnd, path16, 0);
+			}
 		}
 		break;
 	
 	}
 	return DefWindowProc(hWnd, uMsg, wParam, lParam);
+}
+
+void updateRecentList(HWND hWnd) {
+	HMENU hMenu = GetSubMenu(GetMenu(hWnd), 0);
+	
+	for (int i = 0; i < MAX_RECENT_FILES; i++)
+		DeleteMenu(hMenu, IDM_RECENT + i, MF_BYCOMMAND);
+	DeleteMenu(hMenu, IDM_SEPARATOR2, MF_BYCOMMAND);
+
+	TCHAR* buf16 = calloc(20 * MAX_PATH, sizeof(TCHAR));
+	if (GetPrivateProfileString(APP_NAME, TEXT("recent"), NULL, buf16, 20 * MAX_PATH, iniPath)) {
+		InsertMenu(hMenu, IDM_EXIT, MF_BYCOMMAND | MF_STRING, IDM_SEPARATOR2, NULL);
+		int i = 0;
+		TCHAR* path16 = _tcstok(buf16, TEXT("?"));
+		while (path16 != NULL && i < MAX_RECENT_FILES) {
+			if (_taccess(path16, 0) == 0) {
+				InsertMenu(hMenu, IDM_SEPARATOR2, MF_BYCOMMAND | MF_STRING, IDM_RECENT + i, path16);
+				path16 = _tcstok(NULL, TEXT("?"));
+				i++;
+			}
+		}		
+	}
+	free(buf16);
 }
 
 HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
@@ -230,16 +363,15 @@ HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
 		return NULL;
 	}
 	free(fileToLoad8);
-
-	INITCOMMONCONTROLSEX icex;
-	icex.dwSize = sizeof(icex);
-	icex.dwICC = ICC_LISTVIEW_CLASSES;
-	InitCommonControlsEx(&icex);
 	
-	setlocale(LC_CTYPE, "");
+	HWND hMainWnd = GetDlgItem(hParentWnd, IDC_MAIN);
+	if (hMainWnd) {
+		ListCloseWindow(hMainWnd);
+		DestroyWindow(hMainWnd);
+	}
 
 	BOOL isStandalone = GetParent(hParentWnd) == HWND_DESKTOP;
-	HWND hMainWnd = CreateWindow(WC_STATIC, APP_NAME, WS_CHILD | (isStandalone ? SS_SUNKEN : 0),
+	hMainWnd = CreateWindow(WC_STATIC, APP_NAME, WS_CHILD | (isStandalone ? SS_SUNKEN : 0),
 		0, 0, 100, 100, hParentWnd, (HMENU)IDC_MAIN, GetModuleHandle(0), NULL);
 
 	int cacheSize = getStoredValue(TEXT("cache-size"), 2000);
@@ -317,9 +449,7 @@ HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
 	AppendMenu(hGridMenu, MF_STRING, IDM_HIDE_COLUMN, TEXT("Hide column"));		
 	AppendMenu(hGridMenu, MF_STRING, 0, NULL);
 	AppendMenu(hGridMenu, (*(int*)GetProp(hMainWnd, TEXT("FILTERROW")) != 0 ? MF_CHECKED : 0) | MF_STRING, IDM_FILTER_ROW, TEXT("Filters"));		
-	AppendMenu(hGridMenu, (*(int*)GetProp(hMainWnd, TEXT("DARKTHEME")) != 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DARK_THEME, TEXT("Dark theme"));				
-	AppendMenu(hGridMenu, MF_STRING, 0, NULL);
-	AppendMenu(hGridMenu, MF_STRING, IDM_ABOUT, TEXT("About"));		
+	AppendMenu(hGridMenu, (*(int*)GetProp(hMainWnd, TEXT("DARKTHEME")) != 0 ? MF_CHECKED : 0) | MF_STRING, IDM_DARK_THEME, TEXT("Dark theme"));					
 	SetProp(hMainWnd, TEXT("GRIDMENU"), hGridMenu);
 
 	HMENU hListMenu = CreatePopupMenu();
@@ -355,10 +485,43 @@ HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
 
 	SendMessage(hMainWnd, WMU_SET_FONT, 0, 0);
 	SendMessage(hMainWnd, WMU_SET_THEME, 0, 0);
-	ListBox_SetCurSel(hListWnd, 0);
-	SendMessage(hMainWnd, WMU_UPDATE_GRID, 0, 0);
+	if (ListBox_GetCount(hListWnd) > 0) {
+		ListBox_SetCurSel(hListWnd, 0);
+		SendMessage(hMainWnd, WMU_UPDATE_GRID, 0, 0);
+	} else {
+		MessageBox(hParentWnd, TEXT("The database is empty"), fileToLoad, MB_OK);
+	}
+
 	ShowWindow(hMainWnd, SW_SHOW);
-	SetFocus(hListWnd);
+	SetFocus(hListWnd);	
+	SetWindowText(hParentWnd, fileToLoad);
+	SendMessage(hParentWnd, WM_SIZE, 0, 0);	
+	
+	TCHAR* paths16 = calloc(20 * MAX_PATH, sizeof(TCHAR));
+	_tcscat(paths16, fileToLoad);
+	_tcscat(paths16, TEXT("?"));	
+	
+	TCHAR* buf16 = calloc(20 * MAX_PATH, sizeof(TCHAR));
+	if (GetPrivateProfileString(APP_NAME, TEXT("recent"), NULL, buf16, 20 * MAX_PATH, iniPath)) {
+		int i = 0;
+		TCHAR* path16 = _tcstok(buf16, TEXT("?"));
+		while (path16 != NULL && i < MAX_RECENT_FILES) {
+			TCHAR tmp16[MAX_PATH + 1] = {0};
+			_tcscat(tmp16, path16);
+			_tcscat(tmp16, TEXT("?"));	
+
+			if (_tcsstr(paths16, tmp16) == 0 && _taccess(path16, 0) == 0) {
+				_tcscat(paths16, tmp16);
+				i++;
+			}
+			
+			path16 = _tcstok(NULL, TEXT("?"));
+		}		
+	}
+	WritePrivateProfileString(APP_NAME, TEXT("recent"), paths16, iniPath);
+	free(buf16);
+	free(paths16);
+	updateRecentList(hParentWnd);
 
 	return hMainWnd;
 }
@@ -389,7 +552,7 @@ void __stdcall ListCloseWindow(HWND hWnd) {
 		free(journal);
 	}	
 	free(dbpath);
-	
+		
 	free((int*)GetProp(hWnd, TEXT("HASJOURNAL")));
 	free((int*)GetProp(hWnd, TEXT("FILTERROW")));
 	free((int*)GetProp(hWnd, TEXT("DARKTHEME")));	
@@ -726,7 +889,7 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				free(delimiter);
 			}
 			
-			if (cmd == IDM_ADD_ROW) {
+			if (cmd == IDM_ADD_ROW && getStoredValue(TEXT("editable"), 1) == 1) {
 				struct DLGITEMTEMPLATEEX{DLGITEMTEMPLATE; WORD menu; WORD windowClass;} tpl = {0};
 				if (IDOK == DialogBoxIndirectParam ((HINSTANCE)GetModuleHandle(NULL), (LPCDLGTEMPLATE)&tpl, hWnd, &cbDlgAddRow, (LPARAM)hWnd)) {
 					SendMessage(hWnd, WMU_UPDATE_ROW_COUNT, 0, 0);
@@ -876,46 +1039,6 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				UINT msg = cmd == IDM_FILTER_ROW ? WMU_SET_HEADER_FILTERS : WMU_SET_THEME;
 				SendMessage(hWnd, msg, 0, 0);				
 			}
-			
-			if (cmd == IDM_ABOUT) {
-				OSVERSIONINFO vi = {0};
-				vi.dwOSVersionInfoSize = sizeof(OSVERSIONINFO);
-
-				NTSTATUS (WINAPI *pRtlGetVersion)(PRTL_OSVERSIONINFOW lpVersionInformation) = NULL;
-				HINSTANCE hNTdllDll = LoadLibrary(TEXT("ntdll.dll"));
-
-				if (hNTdllDll != NULL) {
-					pRtlGetVersion = (NTSTATUS (WINAPI *)(PRTL_OSVERSIONINFOW))
-					GetProcAddress (hNTdllDll, "RtlGetVersion");
-
-					if (pRtlGetVersion != NULL)
-						pRtlGetVersion((PRTL_OSVERSIONINFOW)&vi);
-
-					FreeLibrary(hNTdllDll);
-				}
-
-				if (pRtlGetVersion == NULL)
-					GetVersionEx(&vi);
-
-				BOOL isWin64 = FALSE;
-				#if defined(_WIN64)
-					isWin64 = TRUE;
-				#else
-					isWin64 = IsWow64Process(GetCurrentProcess(), &isWin64) && isWin64;
-				#endif
-
-				TCHAR buf[1024];
-				_sntprintf(buf, 1023, TEXT("Basic SQLite viewer\nHomepage: github.com/little-brother/sqlite-x\nE-mail: lb-im@ya.ru\n\nGUI version: %ls\nArchitecture: %ls\nSQLite version: %hs\nBuild date: %ls\n\nOS: %i.%i.%i %ls %ls"),
-					APP_VERSION,
-					APP_PLATFORM == 32 ? TEXT("x86") : TEXT("x86-64"),
-					sqlite3_libversion(),
-					TEXT(__DATE__),
-					vi.dwMajorVersion, vi.dwMinorVersion, vi.dwBuildNumber, vi.szCSDVersion,
-					isWin64 ? TEXT("x64") : TEXT("x32")
-				);
-
-				MessageBox(hWnd, buf, APP_NAME, MB_OK);		
-			}
 		}
 		break;
 
@@ -1063,7 +1186,7 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SendMessage(hGridWnd, WM_SETREDRAW, TRUE, 0);
 					InvalidateRect(hGridWnd, NULL, TRUE);
 				}
-				
+								
 				if (kd->wVKey == 0x20 && isCtrl) { // Ctrl + Space				
 					SendMessage(hWnd, WMU_SHOW_COLUMNS, 0, 0);					
 					return TRUE;
@@ -1607,6 +1730,9 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				return TRUE;
 			}
 			
+			if (wParam == VK_INSERT)
+				SendMessage(hWnd, WM_COMMAND, IDM_ADD_ROW, 0);
+			
 			if (wParam == 0x20 && isCtrl) { // Ctrl + Space
 				SendMessage(hWnd, WMU_SHOW_COLUMNS, 0, 0);
 				return TRUE;
@@ -1854,6 +1980,7 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 		
 			HWND hBtn = CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD, 245, colCount * h + 15, 80, 22, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
 			SendMessage(hBtn, WM_SETFONT, (WPARAM)hFont, 0);
+			SendMessage(hWnd, DM_SETDEFID, IDC_DLG_OK, 0);
 			InvalidateRect(hWnd, NULL, TRUE);
 		}
 		break;
