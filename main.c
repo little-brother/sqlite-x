@@ -82,7 +82,7 @@
 #define MAX_RECENT_FILES       10 
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("0.9.7")
+#define APP_VERSION            TEXT("0.9.8")
 #ifdef __MINGW64__
 #define APP_PLATFORM               64
 #else
@@ -314,8 +314,8 @@ LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 			
 			if (cmd >= IDM_RECENT && cmd < IDM_RECENT + MAX_RECENT_FILES) {
 				TCHAR path16[MAX_PATH + 1];
-				GetMenuString(GetSubMenu(GetMenu(hWnd), 0), cmd, path16, MAX_PATH, MF_BYCOMMAND);
-				ListLoadW (hWnd, path16, 0);
+				if (GetMenuString(GetSubMenu(GetMenu(hWnd), 0), cmd, path16, MAX_PATH, MF_BYCOMMAND))
+					ListLoadW (hWnd, path16, 0);
 			}
 		}
 		break;
@@ -333,11 +333,13 @@ void updateRecentList(HWND hWnd) {
 
 	TCHAR* buf16 = calloc(20 * MAX_PATH, sizeof(TCHAR));
 	if (GetPrivateProfileString(APP_NAME, TEXT("recent"), NULL, buf16, 20 * MAX_PATH, iniPath)) {
-		InsertMenu(hMenu, IDM_EXIT, MF_BYCOMMAND | MF_STRING, IDM_SEPARATOR2, NULL);
 		int i = 0;
 		TCHAR* path16 = _tcstok(buf16, TEXT("?"));
 		while (path16 != NULL && i < MAX_RECENT_FILES) {
 			if (_taccess(path16, 0) == 0) {
+				if (i == 0)	
+					InsertMenu(hMenu, IDM_EXIT, MF_BYCOMMAND | MF_STRING, IDM_SEPARATOR2, NULL);
+
 				InsertMenu(hMenu, IDM_SEPARATOR2, MF_BYCOMMAND | MF_STRING, IDM_RECENT + i, path16);
 				i++;
 			}
