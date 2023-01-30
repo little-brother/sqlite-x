@@ -82,7 +82,7 @@
 #define MAX_RECENT_FILES       10 
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("0.9.6")
+#define APP_VERSION            TEXT("0.9.7")
 #ifdef __MINGW64__
 #define APP_PLATFORM               64
 #else
@@ -183,6 +183,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	ShowWindow(hWnd, nCmdShow);
 	SendMessage(hWnd, WM_SIZE, 0, 0);
 	updateRecentList(hWnd);
+
 	
 	if (nArgs < 2 && getStoredValue(TEXT("open-last-db"), 1))
 		SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDM_RECENT, 0), 0);
@@ -338,9 +339,9 @@ void updateRecentList(HWND hWnd) {
 		while (path16 != NULL && i < MAX_RECENT_FILES) {
 			if (_taccess(path16, 0) == 0) {
 				InsertMenu(hMenu, IDM_SEPARATOR2, MF_BYCOMMAND | MF_STRING, IDM_RECENT + i, path16);
-				path16 = _tcstok(NULL, TEXT("?"));
 				i++;
 			}
+			path16 = _tcstok(NULL, TEXT("?"));
 		}		
 	}
 	free(buf16);
