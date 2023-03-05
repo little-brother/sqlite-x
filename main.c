@@ -32,12 +32,14 @@
 #define WMU_HOT_KEYS           WM_USER + 13  
 #define WMU_HOT_CHARS          WM_USER + 14
 #define WMU_EDIT_CELL          WM_USER + 20
+#define WMU_UPDATE_COUNTS      WM_USER + 22
 
 #define IDC_MAIN               100
 #define IDC_TABLELIST          101
 #define IDC_GRID               102
 #define IDC_STATUSBAR          103
 #define IDC_CELL_EDIT          104
+#define IDC_BUTTON             105
 #define IDC_HEADER_EDIT        1000
 #define IDC_DLG_GRID           2000
 #define IDC_DLG_OK             2001
@@ -50,7 +52,7 @@
 #define IDM_FILTER_ROW         5003
 #define IDM_DARK_THEME         5004
 #define IDM_HIDE_COLUMN        5010
-#define IDM_DDL                5015
+#define IDM_DROP               5015
 #define IDM_BLOB               5020
 #define IDM_ADD_ROW            5021
 #define IDM_DELETE_ROW         5022
@@ -82,7 +84,7 @@
 #define MAX_RECENT_FILES       10 
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("0.9.8")
+#define APP_VERSION            TEXT("0.9.9")
 #ifdef __MINGW64__
 #define APP_PLATFORM               64
 #else
@@ -90,6 +92,12 @@
 #endif
 
 static TCHAR iniPath[MAX_PATH] = {0};
+
+struct DLGITEMTEMPLATEEX {
+	DLGITEMTEMPLATE; 
+	WORD menu; 
+	WORD windowClass;
+};
 
 LRESULT CALLBACK cbMainWnd(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags);
@@ -100,6 +108,8 @@ LRESULT CALLBACK cbNewHeader(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK cbNewFilterEdit (HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK cbNewCellEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK cbDlgAddTable(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+BOOL CALLBACK cbEnumSetFont (HWND hWnd, LPARAM hFont);
 void updateRecentList(HWND hWnd);
 
 void bindValue(sqlite3_stmt* stmt, int i, const char* value8);
@@ -427,8 +437,11 @@ HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
 	int sizes[7] = {35 * z, 110 * z, 180 * z, 225 * z, 420 * z, 500 * z, -1};
 	SendMessage(hStatusWnd, SB_SETPARTS, 7, (LPARAM)&sizes);
 
-	HWND hListWnd = CreateWindow(TEXT("LISTBOX"), NULL, WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_HSCROLL,
-		0, 0, 100, 100, hMainWnd, (HMENU)IDC_TABLELIST, GetModuleHandle(0), NULL);
+	HWND hBtnWnd = CreateWindow(WC_BUTTON, TEXT("Add table"), WS_CHILD | WS_VISIBLE,
+		0, 0, 100, 100, hMainWnd, (HMENU)IDC_BUTTON, GetModuleHandle(0), NULL);
+
+	HWND hListWnd = CreateWindow(WC_LISTBOX, NULL, WS_CHILD | WS_VISIBLE | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP | WS_HSCROLL,
+		0, 20, 100, 100, hMainWnd, (HMENU)IDC_TABLELIST, GetModuleHandle(0), NULL);
 	SetProp(hListWnd, TEXT("WNDPROC"), (HANDLE)SetWindowLongPtr(hListWnd, GWLP_WNDPROC, (LONG_PTR)cbHotKey));	
 
 	HWND hGridWnd = CreateWindow(WC_LISTVIEW, NULL, WS_CHILD | WS_VISIBLE | LVS_REPORT | LVS_SHOWSELALWAYS | LVS_OWNERDATA | WS_TABSTOP,
@@ -456,14 +469,13 @@ HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
 	SetProp(hMainWnd, TEXT("GRIDMENU"), hGridMenu);
 
 	HMENU hListMenu = CreatePopupMenu();
-	AppendMenu(hListMenu, MF_STRING, IDM_DDL, TEXT("View DDL"));
+	AppendMenu(hListMenu, MF_STRING, IDM_DROP, TEXT("Delete"));
 	SetProp(hMainWnd, TEXT("LISTMENU"), hListMenu);
 
 	HMENU hBlobMenu = CreatePopupMenu();
 	AppendMenu(hBlobMenu, MF_STRING, IDM_BLOB, TEXT("Save to file"));
 	SetProp(hMainWnd, TEXT("BLOBMENU"), hBlobMenu);
 
-	int tCount = 0, vCount = 0;
 	sqlite3_stmt *stmt;
 	sqlite3_prepare_v2(db, "select name, type from sqlite_master where type in ('table', 'view') order by type, name", -1, &stmt, 0);
 	while(SQLITE_ROW == sqlite3_step(stmt)) {
@@ -473,32 +485,24 @@ HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
 
 		BOOL isTable = strcmp((char*)sqlite3_column_text(stmt, 1), "table") == 0;
 		SendMessage(hListWnd, LB_SETITEMDATA, pos, isTable);
-
-		tCount += isTable;
-		vCount += !isTable;
 	}
 	sqlite3_finalize(stmt);
+
 	TCHAR buf[255];
 	_sntprintf(buf, 32, TEXT(" %ls"), APP_VERSION);	
 	SendMessage(hStatusWnd, SB_SETTEXT, SB_VERSION, (LPARAM)buf);	
-	_sntprintf(buf, 255, TEXT(" Tables: %i"), tCount);
-	SendMessage(hStatusWnd, SB_SETTEXT, SB_TABLE_COUNT, (LPARAM)buf);
-	_sntprintf(buf, 255, TEXT(" Views: %i"), vCount);
-	SendMessage(hStatusWnd, SB_SETTEXT, SB_VIEW_COUNT, (LPARAM)buf);
 
+	SendMessage(hMainWnd, WMU_UPDATE_COUNTS, 0, 0);
 	SendMessage(hMainWnd, WMU_SET_FONT, 0, 0);
 	SendMessage(hMainWnd, WMU_SET_THEME, 0, 0);
-	if (ListBox_GetCount(hListWnd) > 0) {
-		ListBox_SetCurSel(hListWnd, 0);
-		SendMessage(hMainWnd, WMU_UPDATE_GRID, 0, 0);
-	} else {
-		MessageBox(hParentWnd, TEXT("The database is empty"), fileToLoad, MB_OK);
-	}
-
+	
+	ListBox_SetCurSel(hListWnd, 0);
+	SendMessage(hMainWnd, WMU_UPDATE_GRID, 0, 0);
+	
 	ShowWindow(hMainWnd, SW_SHOW);
 	SetFocus(hListWnd);	
 	SetWindowText(hParentWnd, fileToLoad);
-	SendMessage(hParentWnd, WM_SIZE, 0, 0);	
+	SendMessage(hParentWnd, WM_SIZE, 0, 0);
 	
 	TCHAR* paths16 = calloc(20 * MAX_PATH, sizeof(TCHAR));
 	_tcscat(paths16, fileToLoad);
@@ -647,9 +651,36 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 			int splitterW = *(int*)GetProp(hWnd, TEXT("SPLITTERPOSITION"));
 			GetClientRect(hWnd, &rc);
+			HWND hBtnWnd = GetDlgItem(hWnd, IDC_BUTTON);
 			HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
 			HWND hGridWnd = GetDlgItem(hWnd, IDC_GRID);
-			SetWindowPos(hListWnd, 0, 0, 0, splitterW, rc.bottom - statusH, SWP_NOMOVE | SWP_NOZORDER);
+
+			int h = 0;
+			if (getStoredValue(TEXT("editable"), 1) == 1) {				
+				HWND hHeader = ListView_GetHeader(hGridWnd);
+				BOOL isFilterRow = *(int*)GetProp(hWnd, TEXT("FILTERROW")) != 0;
+				BOOL hasColumns = Header_GetItemCount(hHeader) > 0;
+				LONG_PTR styles = 0;
+				if (!hasColumns) {
+					styles = GetWindowLongPtr(hHeader, GWL_STYLE);
+					SetWindowLongPtr(hHeader, GWL_STYLE, isFilterRow ? styles | HDS_FILTERBAR : styles & (~HDS_FILTERBAR));
+					ListView_AddColumn(hGridWnd, TEXT("Temp"), LVCFMT_LEFT);
+				}
+
+				RECT rcHeader;
+				Header_GetItemRect(hHeader, 0, &rcHeader);
+				h = rcHeader.bottom - rcHeader.top;
+				if (isFilterRow)
+					h = round(h/2);
+
+				if (!hasColumns) {
+					SetWindowLongPtr(hHeader, GWL_STYLE, styles);
+					ListView_DeleteColumn(hGridWnd, 0);
+				}
+			}
+
+			SetWindowPos(hBtnWnd, 0, 0, 0, splitterW, h, SWP_NOMOVE | SWP_NOZORDER);
+			SetWindowPos(hListWnd, 0, 0, h, splitterW, rc.bottom - statusH - h, SWP_NOZORDER);
 			SetWindowPos(hGridWnd, 0, splitterW + SPLITTER_WIDTH, 0, rc.right - splitterW - SPLITTER_WIDTH, rc.bottom - statusH, SWP_NOZORDER);
 		}
 		break;
@@ -755,9 +786,10 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SendMessage(hWnd, WM_COMMAND, MAKELPARAM(IDC_TABLELIST, LBN_SELCHANGE), (LPARAM)hListWnd);
 				}
 
-				if (pos != -1) {
+				if (pos != -1 && currPos != -1 && getStoredValue(TEXT("editable"), 1) == 1) {
 					ClientToScreen(hListWnd, &p);
-					TrackPopupMenu(GetProp(hWnd, TEXT("LISTMENU")), TPM_RIGHTBUTTON | TPM_TOPALIGN | TPM_LEFTALIGN, p.x, p.y, 0, hWnd, NULL);
+					HMENU hMenu = GetProp(hWnd, TEXT("LISTMENU"));
+					TrackPopupMenu(hMenu, TPM_RIGHTBUTTON | TPM_TOPALIGN | TPM_LEFTALIGN, p.x, p.y, 0, hWnd, NULL);
 				}
 			}
 		}
@@ -772,6 +804,17 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 		
 		case WM_COMMAND: {
 			WORD cmd = LOWORD(wParam);
+			if (cmd == IDC_BUTTON) {
+				struct DLGITEMTEMPLATEEX tpl = {0};
+				if (IDOK == DialogBoxIndirectParam ((HINSTANCE)GetModuleHandle(NULL), (LPCDLGTEMPLATE)&tpl, hWnd, &cbDlgAddTable, (LPARAM)hWnd)) {
+					HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
+					ListBox_SetCurSel(hListWnd, ListBox_GetCount(hListWnd) - 1);
+					SendMessage(hWnd, WMU_UPDATE_COUNTS, 0, 0);
+					SetFocus(hListWnd);
+					SendMessage(hWnd, WM_COMMAND, MAKELPARAM(IDC_TABLELIST, LBN_SELCHANGE), (LPARAM)hListWnd);
+				}
+			}
+
 			if (cmd == IDC_TABLELIST && HIWORD(wParam) == LBN_SELCHANGE)
 				SendMessage(hWnd, WMU_UPDATE_GRID, 0, 0);
 				
@@ -893,10 +936,11 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			}
 			
 			if (cmd == IDM_ADD_ROW && getStoredValue(TEXT("editable"), 1) == 1) {
-				struct DLGITEMTEMPLATEEX{DLGITEMTEMPLATE; WORD menu; WORD windowClass;} tpl = {0};
+				struct DLGITEMTEMPLATEEX tpl = {0};
 				if (IDOK == DialogBoxIndirectParam ((HINSTANCE)GetModuleHandle(NULL), (LPCDLGTEMPLATE)&tpl, hWnd, &cbDlgAddRow, (LPARAM)hWnd)) {
 					SendMessage(hWnd, WMU_UPDATE_ROW_COUNT, 0, 0);
 					SendMessage(hWnd, WMU_UPDATE_DATA, 0, 0);
+					SetFocus(GetDlgItem(hWnd, IDC_GRID));
 				}	
 			}
 			
@@ -1014,23 +1058,27 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				SendMessage(hWnd, WMU_HIDE_COLUMN, colNo, 0);
 			}						
 
-			if (cmd == IDM_DDL) {
+			if (cmd == IDM_DROP && IDYES == MessageBox(hWnd, TEXT("Are you sure?"), TEXT("Confirmation"), MB_YESNO)) {		
 				sqlite3* db = (sqlite3*)GetProp(hWnd, TEXT("DB"));
 				char* tablename8 = (char*)GetProp(hWnd, TEXT("TABLENAME8"));
 
-				sqlite3_stmt *stmt;
-				if (SQLITE_OK == sqlite3_prepare_v2(db,
-					"select group_concat(sql || ';', char(10) || char(10)) " \
-					"from sqlite_master where tbl_name = ?1 order by iif(type = 'table' or type = 'view', 'a', type)", -1, &stmt, 0)) {
-					sqlite3_bind_text(stmt, 1, tablename8, strlen(tablename8), SQLITE_TRANSIENT);
+				HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
+				int pos = ListBox_GetCurSel(hListWnd);
+				BOOL isTable = SendMessage(hListWnd, LB_GETITEMDATA, pos, 0);
 
-					if (SQLITE_ROW == sqlite3_step(stmt)) {
-						TCHAR* sql = utf8to16((char*)sqlite3_column_text(stmt, 0));
-						MessageBox(hWnd, sql, TEXT("DDL"), MB_OK);
-						free(sql);
+				char query8[1024];
+				snprintf(query8, 1023, "drop %s \"%s\"", isTable ? "table" : "view", tablename8);
+				if (SQLITE_OK == sqlite3_exec(db, query8, 0, 0, 0)) {
+					ListBox_DeleteString(hListWnd, ListBox_GetCurSel(hListWnd));
+					if (LB_ERR != ListBox_SetCurSel(hListWnd, 0)) {
+						SendMessage(hWnd, WM_COMMAND, MAKELPARAM(IDC_TABLELIST, LBN_SELCHANGE), (LPARAM)hListWnd);
+					} else {
+						SendMessage(hWnd, WMU_UPDATE_GRID, 0, 0);
 					}
+					SendMessage(hWnd, WMU_UPDATE_COUNTS, 0, 0);
+				} else {
+					MessageBoxA(hWnd, sqlite3_errmsg(db), NULL, MB_OK);
 				}
-				sqlite3_finalize(stmt);
 			}
 			
 			if (cmd == IDM_FILTER_ROW || cmd == IDM_DARK_THEME) {
@@ -1338,6 +1386,11 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 			char* tablename8 = (char*)GetProp(hWnd, TEXT("TABLENAME8"));
 			int pos = ListBox_GetCurSel(hListWnd);
+			if (pos == -1) {
+				SendMessage(hGridWnd, WM_SETREDRAW, TRUE, 0);
+				return TRUE;
+			}
+
 			TCHAR name16[256];
 			ListBox_GetText(hListWnd, pos, name16);
 			char* name8 = utf16to8(name16);
@@ -1642,8 +1695,10 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			DeleteFont(GetProp(hWnd, TEXT("FONT")));
 
 			HFONT hFont = CreateFont (*pFontSize, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE, ANSI_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_SWISS, (TCHAR*)GetProp(hWnd, TEXT("FONTFAMILY")));
+			HWND hBtnWnd = GetDlgItem(hWnd, IDC_BUTTON);
 			HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
 			HWND hGridWnd = GetDlgItem(hWnd, IDC_GRID);
+			SendMessage(hBtnWnd, WM_SETFONT, (LPARAM)hFont, TRUE);
 			SendMessage(hListWnd, WM_SETFONT, (LPARAM)hFont, TRUE);
 			SendMessage(hGridWnd, WM_SETFONT, (LPARAM)hFont, TRUE);
 
@@ -1668,6 +1723,7 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				
 			SetProp(hWnd, TEXT("FONT"), hFont);
 			PostMessage(hWnd, WMU_AUTO_COLUMN_SIZE, 0, 0);
+			PostMessage(hWnd, WM_SIZE, 0, 0);
 		}
 		break;
 		
@@ -1758,7 +1814,25 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				wParam == VK_TAB || wParam == VK_RETURN ||
 				isCtrl && (wParam == 0x46 || wParam == 0x20);
 		}
-		break;					
+		break;	
+
+		case WMU_UPDATE_COUNTS: {
+			int tCount = 0, vCount = 0;
+			HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
+			for (int pos = 0; pos < ListBox_GetCount(hListWnd); pos++) {
+				BOOL isTable = SendMessage(hListWnd, LB_GETITEMDATA, pos, 0);
+				tCount += isTable;
+				vCount += !isTable; 
+			}	
+
+			HWND hStatusWnd = GetDlgItem(hWnd, IDC_STATUSBAR);
+			TCHAR buf[255];	
+			_sntprintf(buf, 255, TEXT(" Tables: %i"), tCount);
+			SendMessage(hStatusWnd, SB_SETTEXT, SB_TABLE_COUNT, (LPARAM)buf);
+			_sntprintf(buf, 255, TEXT(" Views: %i"), vCount);
+			SendMessage(hStatusWnd, SB_SETTEXT, SB_VIEW_COUNT, (LPARAM)buf);
+		}				
+		break;
 	}
 
 	return CallWindowProc((WNDPROC)GetProp(hWnd, TEXT("WNDPROC")), hWnd, msg, wParam, lParam);
@@ -1956,9 +2030,8 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 		case WM_INITDIALOG: {
 			SetWindowLongPtr(hWnd, GWLP_USERDATA, lParam);
 			SetWindowLongPtr(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU);
+			SetWindowLongPtr(hWnd, GWL_EXSTYLE, WS_EX_DLGMODALFRAME);
 			SetWindowText(hWnd, TEXT("Add row"));
-			
-			HFONT hFont = (HFONT)GetStockObject(DEFAULT_GUI_FONT);			
 			
 			HWND hGridWnd = GetDlgItem((HWND)lParam, IDC_GRID);
 			HWND hHeader = ListView_GetHeader(hGridWnd);
@@ -1972,18 +2045,16 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 					5, 10 + colNo * h, w - 5, h, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL + colNo), GetModuleHandle(0), 0);
 				HWND hEdit = CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL, 
 					w + 5, 10 + colNo * h - 2, 200, h - 2, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + colNo), GetModuleHandle(0), 0);
-
-				SendMessage(hLabel, WM_SETFONT, (WPARAM)hFont, 0);
-				SendMessage(hEdit, WM_SETFONT, (WPARAM)hFont, 0);
 			}	
 			
 			RECT rc;
 			GetWindowRect(hGridWnd, &rc);
 			SetWindowPos(hWnd, 0, rc.left + 50, rc.top + 50, 340, colCount * h + 70, SWP_NOZORDER);	
 		
-			HWND hBtn = CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD, 245, colCount * h + 15, 80, 22, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
-			SendMessage(hBtn, WM_SETFONT, (WPARAM)hFont, 0);
+			HWND hBtn = CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 245, colCount * h + 15, 80, 22, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
 			SendMessage(hWnd, DM_SETDEFID, IDC_DLG_OK, 0);
+
+			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT));
 			InvalidateRect(hWnd, NULL, TRUE);
 		}
 		break;
@@ -2064,6 +2135,94 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 	}
 	
 	return FALSE;
+}
+
+// lParam = USERDATA = hMainWnd
+INT_PTR CALLBACK cbDlgAddTable(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+	switch (msg) {
+		case WM_INITDIALOG: {
+			SetWindowLongPtr(hWnd, GWLP_USERDATA, lParam);
+			SetWindowLongPtr(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU);
+			SetWindowLongPtr(hWnd, GWL_EXSTYLE, WS_EX_DLGMODALFRAME);
+			SetWindowText(hWnd, TEXT("New table..."));
+			
+			
+			CreateWindow(WC_STATIC, TEXT("Table name"), WS_VISIBLE | WS_CHILD, 
+				10, 5, 300, 16, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL), GetModuleHandle(0), 0);
+
+			CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL, 
+				10, 22, 300, 20, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT), GetModuleHandle(0), 0);
+
+			CreateWindow(WC_STATIC, TEXT("Column names separated by commas"), WS_VISIBLE | WS_CHILD, 
+				10, 55, 300, 16, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL), GetModuleHandle(0), 0);
+
+			CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL, 
+				10, 72, 300, 50, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + 1), GetModuleHandle(0), 0);
+
+			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 240, 130, 70, 22, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
+
+			RECT rc;
+			GetWindowRect((HWND)lParam, &rc);
+			SetWindowPos(hWnd, 0, rc.left + 50, rc.top + 50, 325, 185, SWP_NOZORDER);	
+		
+			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT));	
+			InvalidateRect(hWnd, NULL, TRUE);
+			
+		}
+		break;
+		
+		case WM_COMMAND: {
+			WORD cmd = LOWORD(wParam);
+			if (cmd == IDC_DLG_OK) {
+				HWND hMainWnd = (HWND)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+
+				TCHAR tablename16[MAX_TABLE_LENGTH];
+				GetDlgItemText(hWnd, IDC_DLG_EDIT, tablename16, MAX_TABLE_LENGTH);
+				if (_tcslen(tablename16) == 0)
+					return MessageBox(hWnd, TEXT("Table name is empty"), NULL, MB_OK);
+
+				TCHAR columns16[MAX_TEXT_LENGTH];
+				GetDlgItemText(hWnd, IDC_DLG_EDIT + 1, columns16, MAX_TEXT_LENGTH);
+				if (_tcslen(columns16) == 0)
+					return MessageBox(hWnd, TEXT("You should provide at least one column name"), NULL, MB_OK);
+
+				int len = _tcslen(tablename16) + _tcslen(columns16) + 256;
+				TCHAR query16[len + 1];
+				_sntprintf(query16, len, TEXT("create table \"%ls\" (%ls)"), tablename16, columns16);
+
+				sqlite3* db = (sqlite3*)GetProp(hMainWnd, TEXT("DB"));
+				char* query8 = utf16to8(query16);
+				BOOL rc = SQLITE_OK == sqlite3_exec(db, query8, 0, 0, 0);
+				free(query8);
+
+				if (!rc)
+					return MessageBoxA(hWnd, sqlite3_errmsg(db), "Error", MB_OK);
+
+				HWND hListWnd = GetDlgItem(hMainWnd, IDC_TABLELIST);
+				int pos = ListBox_AddString(hListWnd, tablename16);
+				SendMessage(hListWnd, LB_SETITEMDATA, pos, 1);
+
+				EndDialog(hWnd, IDOK);
+			}
+			
+			if (cmd == IDCANCEL) {
+				EndDialog (hWnd, IDCANCEL);
+			}
+		}
+		break;
+		
+		case WM_CLOSE: {
+			EndDialog(hWnd, IDCANCEL);
+		}
+		break;
+	}
+	
+	return FALSE;
+}
+
+BOOL CALLBACK cbEnumSetFont (HWND hWnd, LPARAM hFont) {
+	SendMessage(hWnd, WM_SETFONT, (WPARAM)hFont, 0);
+	return TRUE;
 }
 
 void bindValue(sqlite3_stmt* stmt, int i, const char* value8) {
