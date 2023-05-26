@@ -84,7 +84,7 @@
 #define MAX_RECENT_FILES       10 
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("1.0.0")
+#define APP_VERSION            TEXT("1.0.1")
 #ifdef __MINGW64__
 #define APP_PLATFORM               64
 #else
@@ -370,7 +370,7 @@ HWND ListLoadW (HWND hParentWnd, TCHAR* fileToLoad, int showFlags) {
 
 	BOOL isEditable = getStoredValue(TEXT("editable"), 1);
 	sqlite3 *db = 0;
-	if (SQLITE_OK != sqlite3_open_v2(fileToLoad8, &db, (isEditable ? SQLITE_OPEN_READWRITE : SQLITE_OPEN_READONLY) | SQLITE_OPEN_URI, NULL)) {
+	if (SQLITE_OK != sqlite3_open_v2(fileToLoad8, &db, (isEditable ? (SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE) : SQLITE_OPEN_READONLY) | SQLITE_OPEN_URI, NULL)) {
 		MessageBox(hParentWnd, TEXT("Error to open database"), fileToLoad, MB_OK);
 		free(fileToLoad8);
 		return NULL;
@@ -947,6 +947,7 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				if (IDOK == DialogBoxIndirectParam ((HINSTANCE)GetModuleHandle(NULL), (LPCDLGTEMPLATE)&tpl, hWnd, &cbDlgAddRow, (LPARAM)hWnd)) {
 					SendMessage(hWnd, WMU_UPDATE_ROW_COUNT, 0, 0);
 					SendMessage(hWnd, WMU_UPDATE_DATA, 0, 0);
+					SendMessage(hWnd, WMU_AUTO_COLUMN_SIZE, 0, 0);
 					SetFocus(GetDlgItem(hWnd, IDC_GRID));
 				}	
 			}
