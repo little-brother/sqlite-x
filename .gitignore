@@ -1,4 +1,8 @@
 out/
+temp/
+lib/
+bin/
+obj/
 *.sqlite
 *.db
 resource.res
@@ -6,3 +10,9 @@ sqlite-x.ini
 *.bat
 *.exe
 logo.png
+ToDo.txt
+sqlite-x.cbp
+sqlite-x.depend
+sqlite-x.layout
+main.o
+sqlite3.dll
