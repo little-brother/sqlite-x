@@ -87,7 +87,7 @@
 #define MAX_RECENT_FILES       10
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("1.0.2")
+#define APP_VERSION            TEXT("1.0.3")
 #ifdef __MINGW64__
 #define APP_PLATFORM               64
 #else
@@ -131,6 +131,7 @@ char* utf16to8(const TCHAR* in);
 int findString(TCHAR* text, TCHAR* word, BOOL isMatchCase, BOOL isWholeWords);
 TCHAR* extractUrl(TCHAR* data);
 void setClipboardText(const TCHAR* text);
+int getFontHeight(HWND hWnd);
 int ListView_AddColumn(HWND hListWnd, TCHAR* colName, int fmt);
 int Header_GetItemText(HWND hWnd, int i, TCHAR* pszText, int cchTextMax);
 void Menu_SetItemState(HMENU hMenu, UINT wID, UINT fState);
@@ -829,13 +830,13 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			WORD cmd = LOWORD(wParam);
 			if (cmd == IDC_BUTTON) {
 				struct DLGITEMTEMPLATEEX tpl = {0};
+				HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
 				if (IDOK == DialogBoxIndirectParam ((HINSTANCE)GetModuleHandle(NULL), (LPCDLGTEMPLATE)&tpl, hWnd, &cbDlgAddTable, (LPARAM)hWnd)) {
-					HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
 					ListBox_SetCurSel(hListWnd, ListBox_GetCount(hListWnd) - 1);
 					SendMessage(hWnd, WMU_UPDATE_COUNTS, 0, 0);
-					SetFocus(hListWnd);
 					SendMessage(hWnd, WM_COMMAND, MAKELPARAM(IDC_TABLELIST, LBN_SELCHANGE), (LPARAM)hListWnd);
 				}
+				SetFocus(hListWnd);
 			}
 
 			if (cmd == IDC_TABLELIST && HIWORD(wParam) == LBN_SELCHANGE)
@@ -965,10 +966,23 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 					setClipboardText(buf);
 				} else {
 					TCHAR path16[MAX_PATH] = {0};
-					TCHAR filter16[] = TEXT("CSV files (*.csv)\0All\0*.*\0");
+					TCHAR filter16[] = TEXT("CSV files (*.csv, *.tsv)\0*.csv;*.tsv\0All\0*.*\0");
 					if (saveFile(path16, filter16, TEXT(""), hWnd)) {
-						FILE *fp = _tfopen (path16, TEXT("wb"));
+						FILE* fp = _tfopen (path16, TEXT("wb"));
 						if (fp) {
+							char* delimiter8 = utf16to8(delimiter);
+							TCHAR colName16[MAX_COLUMN_LENGTH];
+
+							for(int colNo = 0; colNo < colCount; colNo++) {
+								Header_GetItemText(hHeader, colNo, colName16, MAX_COLUMN_LENGTH);
+								char* colName8 = utf16to8(colName16);
+								fwrite(colName8, strlen(colName8), 1, fp);
+								free(colName8);
+
+								fwrite(colNo < colCount - 1 ? delimiter8 : "\n", 1, 1, fp);
+							}
+							free(delimiter8);
+
 							char* buf8 = utf16to8(buf);
 							fwrite(buf8, strlen(buf8), 1, fp);
 							fclose(fp);
@@ -988,8 +1002,8 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 					SendMessage(hWnd, WMU_UPDATE_ROW_COUNT, 0, 0);
 					SendMessage(hWnd, WMU_UPDATE_DATA, 0, 0);
 					SendMessage(hWnd, WMU_AUTO_COLUMN_SIZE, 0, 0);
-					SetFocus(GetDlgItem(hWnd, IDC_GRID));
 				}
+				SetFocus(GetDlgItem(hWnd, IDC_GRID));
 			}
 
 			if (cmd == IDM_DELETE_ROW) {
@@ -1800,6 +1814,7 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			int* pFontSize = (int*)GetProp(hWnd, TEXT("FONTSIZE"));
 			if (*pFontSize + wParam < 10 || *pFontSize + wParam > 48)
 				return 0;
+
 			*pFontSize += wParam;
 			DeleteFont(GetProp(hWnd, TEXT("FONT")));
 
@@ -1808,6 +1823,7 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			HWND hListWnd = GetDlgItem(hWnd, IDC_TABLELIST);
 			HWND hGridWnd = GetDlgItem(hWnd, IDC_GRID);
 			HWND hAutoComplete = (HWND)GetProp(hWnd, TEXT("AUTOCOMPLETE"));
+			SendMessage(hWnd, WM_SETFONT, (LPARAM)hFont, TRUE);
 			SendMessage(hBtnWnd, WM_SETFONT, (LPARAM)hFont, TRUE);
 			SendMessage(hListWnd, WM_SETFONT, (LPARAM)hFont, TRUE);
 			SendMessage(hGridWnd, WM_SETFONT, (LPARAM)hFont, TRUE);
@@ -2158,8 +2174,8 @@ BOOL cbNewAutoCompleteEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 			sqlite3_stmt* stmt;
 			char query8[1024 + 2 * MAX_TABLE_LENGTH  + 4 * MAX_COLUMN_LENGTH];
 			BOOL isEnable = TRUE;
-			sprintf(query8, "select select max(rowid) from \"%s\"", tablename8);
-			if (SQLITE_OK == sqlite3_prepare_v2(db, query8, -1, &stmt, 0))
+			sprintf(query8, "select max(rowid) from \"%s\"", tablename8);
+			if (SQLITE_OK == sqlite3_prepare_v2(db, query8, -1, &stmt, 0) && SQLITE_ROW == sqlite3_step(stmt))
 				isEnable = getStoredValue(TEXT("max-autocomplete-rowid"), 10000) > sqlite3_column_int(stmt, 0);
 			sqlite3_finalize(stmt);
 
@@ -2236,6 +2252,8 @@ BOOL cbNewAutoCompleteEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 			if (!IsWindowVisible(hAutoComplete))
 				ShowWindow(hAutoComplete, SW_SHOWNOACTIVATE);
+
+			ListBox_SetCurSel(hAutoComplete, 0);
 		}
 		break;
 
@@ -2264,7 +2282,7 @@ BOOL cbNewAutoCompleteEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				return TRUE;
 			}
 
-			if (wParam == VK_RETURN) {
+			if (wParam == VK_RETURN || wParam == VK_TAB) {
 				HWND hAutoComplete = (HWND)GetProp(hWnd, TEXT("AUTOCOMPLETE"));
 				if (IsWindowVisible(hAutoComplete)) {
 					SendMessage(hAutoComplete, WM_LBUTTONUP, 0, 0);
@@ -2410,6 +2428,20 @@ LRESULT CALLBACK cbNewAddRowEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 	if (cbNewAutoCompleteEdit(hWnd, msg, wParam, lParam))
 		return TRUE;
 
+	if (msg == WM_GETDLGCODE)
+			return (DLGC_WANTTAB | CallWindowProc((WNDPROC)GetProp(hWnd, TEXT("WNDPROC")), hWnd, msg, wParam, lParam));
+
+	if (msg == WM_KEYDOWN && wParam == VK_TAB) {
+		int idc = GetDlgCtrlID(hWnd);
+		HWND hDlgWnd = GetParent(hWnd);
+		HWND hNextWnd = GetDlgItem(hDlgWnd, idc + (HIWORD(GetKeyState(VK_CONTROL)) ? -1: 1));
+		SetFocus(hNextWnd ? hNextWnd : GetDlgItem(hDlgWnd, IDC_DLG_OK));
+		return TRUE;
+	}
+
+	if (msg == WM_CHAR && wParam == VK_TAB)
+		return FALSE;
+
 	return CallWindowProc((WNDPROC)GetProp(hWnd, TEXT("WNDPROC")), hWnd, msg, wParam, lParam);
 }
 
@@ -2422,30 +2454,53 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 			SetWindowLongPtr(hWnd, GWL_EXSTYLE, WS_EX_DLGMODALFRAME);
 			SetWindowText(hWnd, TEXT("Add row"));
 
-			HWND hGridWnd = GetDlgItem((HWND)lParam, IDC_GRID);
+			HWND hMainWnd = (HWND)lParam;
+			HWND hGridWnd = GetDlgItem(hMainWnd, IDC_GRID);
 			HWND hHeader = ListView_GetHeader(hGridWnd);
 			int colCount = Header_GetItemCount(hHeader);
-			int w = 120;
-			int h = 20;
+
+			float z = (getFontHeight(hMainWnd)) / 15.;
+
+			int w = 120 * z;
+			int h = 20 * z;
 			for (int colNo = 0; colNo < colCount; colNo++) {
 				TCHAR colName16[256];
 				Header_GetItemText(hHeader, colNo, colName16, 255);
 				CreateWindow(WC_STATIC, colName16, WS_VISIBLE | WS_CHILD | SS_WORDELLIPSIS | SS_RIGHT,
 					5, 10 + colNo * h, w - 5, h, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL + colNo), GetModuleHandle(0), 0);
 				HWND hEdit = CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL,
-					w + 5, 10 + colNo * h - 2, 200, h - 2, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + colNo), GetModuleHandle(0), 0);
+					w + 5 * z, 10 + colNo * h - 2, 205 * z, h - 1, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + colNo), GetModuleHandle(0), 0);
 				SetProp(hEdit, TEXT("WNDPROC"), (HANDLE)SetWindowLongPtr(hEdit, GWLP_WNDPROC, (LONG_PTR)&cbNewAddRowEdit));
 				SetProp(hEdit, TEXT("AUTOCOMPLETE"), (HWND)GetProp((HWND)lParam, TEXT("AUTOCOMPLETE")));
 				SetProp(hEdit, TEXT("COLNO"), (HANDLE)(LONG_PTR)colNo);
 			}
 
+			sqlite3* db = (sqlite3*)GetProp(hMainWnd, TEXT("DB"));
+			char* tablename8 = (char*)GetProp(hMainWnd, TEXT("TABLENAME8"));
+
+			sqlite3_stmt* stmt;
+			if (SQLITE_OK == sqlite3_prepare_v2(db, "select dflt_value from pragma_table_info(?1) order by cid", -1, &stmt, 0)) {
+				sqlite3_bind_text(stmt, 1, tablename8, strlen(tablename8), SQLITE_TRANSIENT);
+
+				int colNo = 0;
+				while (SQLITE_ROW == sqlite3_step(stmt)) {
+					TCHAR* defValue = utf8to16((const char*)sqlite3_column_text(stmt, 0));
+					if (_tcslen(defValue))
+						Edit_SetCueBannerText(GetDlgItem(hWnd, IDC_DLG_EDIT + colNo), defValue);
+					free(defValue);
+
+					colNo++;
+				}
+			}
+			sqlite3_finalize(stmt);
+
 			RECT rc;
 			GetWindowRect(hGridWnd, &rc);
-			SetWindowPos(hWnd, 0, rc.left + 50, rc.top + 50, 340, colCount * h + 70, SWP_NOZORDER);
+			SetWindowPos(hWnd, 0, rc.left + 50, rc.top + 50, 340 * z, GetSystemMetrics(SM_CYCAPTION) + 2 * GetSystemMetrics(SM_CYBORDER) + colCount * h + 40 * z , SWP_NOZORDER);
 
-			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 245, colCount * h + 15, 80, 22, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
+			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 250 * z, colCount * h + 10 * z, 80 * z, 22 * z, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
 
-			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT));
+			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetProp(hMainWnd, TEXT("FONT")));
 			InvalidateRect(hWnd, NULL, TRUE);
 		}
 		break;
@@ -2557,32 +2612,34 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 INT_PTR CALLBACK cbDlgAddTable(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	switch (msg) {
 		case WM_INITDIALOG: {
+			HWND hMainWnd = (HWND)lParam;
 			SetWindowLongPtr(hWnd, GWLP_USERDATA, lParam);
 			SetWindowLongPtr(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU);
 			SetWindowLongPtr(hWnd, GWL_EXSTYLE, WS_EX_DLGMODALFRAME);
 			SetWindowText(hWnd, TEXT("New table..."));
 
+			float z = (getFontHeight(hMainWnd)) / 15.;
+
 			CreateWindow(WC_STATIC, TEXT("Table name"), WS_VISIBLE | WS_CHILD,
-				10, 5, 300, 16, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL), GetModuleHandle(0), 0);
+				10 * z, 5 * z, 300 * z, 16 * z, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL), GetModuleHandle(0), 0);
 
 			CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL,
-				10, 22, 300, 20, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT), GetModuleHandle(0), 0);
+				10 * z, 22 * z, 300 * z, 20 * z, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT), GetModuleHandle(0), 0);
 
 			CreateWindow(WC_STATIC, TEXT("Column names separated by commas"), WS_VISIBLE | WS_CHILD,
-				10, 55, 300, 16, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL), GetModuleHandle(0), 0);
+				10 * z, 55 * z, 300 * z, 16 * z, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL), GetModuleHandle(0), 0);
 
 			CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL,
-				10, 72, 300, 50, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + 1), GetModuleHandle(0), 0);
+				10 * z, 72 * z, 300 * z, 50 * z, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + 1), GetModuleHandle(0), 0);
 
-			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 240, 130, 70, 22, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
+			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 240 * z, 130 * z, 70 * z, 22 * z, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
 
 			RECT rc;
-			GetWindowRect((HWND)lParam, &rc);
-			SetWindowPos(hWnd, 0, rc.left + 50, rc.top + 50, 325, 185, SWP_NOZORDER);
+			GetWindowRect(hMainWnd, &rc);
+			SetWindowPos(hWnd, 0, rc.left + 50, rc.top + 50, 325 * z, GetSystemMetrics(SM_CYCAPTION) + 2 * GetSystemMetrics(SM_CYBORDER) + 165 * z, SWP_NOZORDER);
 
-			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT));
+			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetProp(hMainWnd, TEXT("FONT")));
 			InvalidateRect(hWnd, NULL, TRUE);
-
 		}
 		break;
 
@@ -2816,6 +2873,19 @@ void setClipboardText(const TCHAR* text) {
 	EmptyClipboard();
 	SetClipboardData(CF_UNICODETEXT, hMem);
 	CloseClipboard();
+}
+
+int getFontHeight(HWND hWnd) {
+	TEXTMETRIC tm;
+	HDC hDC = (HDC)GetDC(hWnd);
+	HFONT hFont = (HFONT)SendMessage(hWnd, WM_GETFONT, 0, 0);
+
+	HFONT hOldFont = SelectObject(hDC, hFont);
+	GetTextMetrics(hDC, &tm);
+	SelectObject(hDC, hOldFont);
+	ReleaseDC(hWnd, hDC);
+
+	return tm.tmHeight;
 }
 
 int ListView_AddColumn(HWND hListWnd, TCHAR* colName, int fmt) {
