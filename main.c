@@ -1,6 +1,7 @@
 // The code is based on https://github.com/little-brother/sqlite-wlx
 #define UNICODE
 #define _UNICODE
+#define _WIN32_WINNT 0x0600
 
 #include <windows.h>
 #include <windowsx.h>
@@ -87,7 +88,7 @@
 #define MAX_RECENT_FILES       10
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("1.0.3")
+#define APP_VERSION            TEXT("1.0.4")
 #ifdef __MINGW64__
 #define APP_PLATFORM               64
 #else
@@ -173,6 +174,8 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	InitCommonControlsEx(&icex);
 
 	setlocale(LC_CTYPE, "");
+	if (getStoredValue(TEXT("dpi-aware"), 0))
+		SetProcessDPIAware();
 
 	TCHAR buf16[MAX_PATH];
 	GetModuleFileName(0, buf16, MAX_PATH);
@@ -201,7 +204,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	ShowWindow(hWnd, nCmdShow);
 	SendMessage(hWnd, WM_SIZE, 0, 0);
 	updateRecentList(hWnd);
-
 
 	if (nArgs < 2 && getStoredValue(TEXT("open-last-db"), 1))
 		SendMessage(hWnd, WM_COMMAND, MAKEWPARAM(IDM_RECENT, 0), 0);
@@ -1690,8 +1692,8 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				ShowWindow(GetDlgItem(hHeader, IDC_HEADER_EDIT + colNo), isFilterRow ? SW_SHOW : SW_HIDE);
 
 			// Bug fix: force Windows to redraw header
-			SetWindowPos(hGridWnd, 0, 0, 0, 0, 0, SWP_NOZORDER | SWP_NOMOVE);
-			SendMessage(getMainWindow(hWnd), WM_SIZE, 0, 0);
+			SetWindowPos(hGridWnd, 0, 0, 0, 100, 100, SWP_NOZORDER | SWP_NOMOVE); // issue #7: width and height must be greater than 0
+			SendMessage(hWnd, WM_SIZE, 0, 0);
 
 			if (isFilterRow)
 				SendMessage(hWnd, WMU_UPDATE_FILTER_SIZE, 0, 0);
@@ -1894,6 +1896,7 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
 		case WMU_HOT_KEYS: {
 			BOOL isCtrl = HIWORD(GetKeyState(VK_CONTROL));
+			BOOL isShift = HIWORD(GetKeyState(VK_SHIFT));
 			if (wParam == VK_TAB) {
 				HWND hFocus = GetFocus();
 				HWND wnds[1000] = {0};
@@ -1907,8 +1910,8 @@ LRESULT CALLBACK cbNewMain(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 				while(wnds[cnt])
 					cnt++;
 
-				no += isCtrl ? -1 : 1;
-				SetFocus(wnds[no] && no >= 0 ? wnds[no] : (isCtrl ? wnds[cnt - 1] : wnds[0]));
+				no += isShift ? -1 : 1;
+				SetFocus(wnds[no] && no >= 0 ? wnds[no] : (isShift ? wnds[cnt - 1] : wnds[0]));
 			}
 
 			if (wParam == VK_F1) {
@@ -2429,12 +2432,14 @@ LRESULT CALLBACK cbNewAddRowEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 		return TRUE;
 
 	if (msg == WM_GETDLGCODE)
-			return (DLGC_WANTTAB | CallWindowProc((WNDPROC)GetProp(hWnd, TEXT("WNDPROC")), hWnd, msg, wParam, lParam));
+		return (DLGC_WANTTAB | CallWindowProc((WNDPROC)GetProp(hWnd, TEXT("WNDPROC")), hWnd, msg, wParam, lParam));
 
 	if (msg == WM_KEYDOWN && wParam == VK_TAB) {
+		BOOL isShift = HIWORD(GetKeyState(VK_SHIFT));
+
 		int idc = GetDlgCtrlID(hWnd);
 		HWND hDlgWnd = GetParent(hWnd);
-		HWND hNextWnd = GetDlgItem(hDlgWnd, idc + (HIWORD(GetKeyState(VK_CONTROL)) ? -1: 1));
+		HWND hNextWnd = GetDlgItem(hDlgWnd, idc + (isShift ? -1: 1));
 		SetFocus(hNextWnd ? hNextWnd : GetDlgItem(hDlgWnd, IDC_DLG_OK));
 		return TRUE;
 	}
