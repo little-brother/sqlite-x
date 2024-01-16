@@ -36,6 +36,8 @@
 #define WMU_EDIT_CELL          WM_USER + 20
 #define WMU_UPDATE_COUNTS      WM_USER + 22
 #define WMU_AUTOCOMPLETE       WM_USER + 23
+#define WMU_SET_SCROLL_HEIGHT  WM_USER + 24
+#define WMU_UPDATE_SCROLL_POS  WM_USER + 25
 
 #define IDC_MAIN               100
 #define IDC_TABLELIST          101
@@ -46,6 +48,7 @@
 #define IDC_HEADER_EDIT        1000
 #define IDC_DLG_GRID           2000
 #define IDC_DLG_OK             2001
+#define IDC_DLG_COLUMNS        2002
 #define IDC_DLG_EDIT           2200
 #define IDC_DLG_LABEL          2500
 
@@ -88,12 +91,15 @@
 #define MAX_RECENT_FILES       10
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("1.0.4")
+#define APP_VERSION            TEXT("1.0.5")
 #ifdef __MINGW64__
-#define APP_PLATFORM               64
+#define APP_PLATFORM           64
 #else
-#define APP_PLATFORM               32
+#define APP_PLATFORM           32
 #endif
+
+#define MIN(a,b) (((a)<(b))?(a):(b))
+#define MAX(a,b) (((a)>(b))?(a):(b))
 
 static TCHAR iniPath[MAX_PATH] = {0};
 
@@ -114,6 +120,7 @@ LRESULT CALLBACK cbNewFilterEdit (HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPa
 BOOL cbNewAutoCompleteEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK cbNewCellEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK cbNewAutoComplete(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK cbNewColumns(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK cbNewAddRowEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK cbDlgAddTable(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
@@ -201,8 +208,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 		getStoredValue(TEXT("width"), 800),
 		getStoredValue(TEXT("height"), 600),
 		SWP_NOZORDER);
-	ShowWindow(hWnd, nCmdShow);
-	SendMessage(hWnd, WM_SIZE, 0, 0);
+	ShowWindow(hWnd, getStoredValue(TEXT("show-maximized"), 0) ? SW_MAXIMIZE : nCmdShow);
 	updateRecentList(hWnd);
 
 	if (nArgs < 2 && getStoredValue(TEXT("open-last-db"), 1))
@@ -219,18 +225,26 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 
 LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 	switch (uMsg) {
-		case WM_DESTROY: {
+		case WM_CLOSE: {
 			HWND hMainWnd = GetDlgItem(hWnd, IDC_MAIN);
 			if (hMainWnd)
 				ListCloseWindow(hMainWnd);
 
 			if (IsWindowVisible(hWnd)) {
-				RECT rc;
-				GetWindowRect(hWnd, &rc);
-				setStoredValue(TEXT("position-x"), rc.left);
-				setStoredValue(TEXT("position-y"), rc.top);
-				setStoredValue(TEXT("width"), rc.right - rc.left);
-				setStoredValue(TEXT("height"), rc.bottom - rc.top);
+				WINDOWPLACEMENT wp = {};
+				wp.length = sizeof(WINDOWPLACEMENT);
+				GetWindowPlacement(hWnd, &wp);
+				if (wp.showCmd == SW_SHOWMAXIMIZED) {
+					setStoredValue(TEXT("show-maximized"), 1);
+				} else {
+					RECT rc;
+					GetWindowRect(hWnd, &rc);
+					setStoredValue(TEXT("position-x"), rc.left);
+					setStoredValue(TEXT("position-y"), rc.top);
+					setStoredValue(TEXT("width"), rc.right - rc.left);
+					setStoredValue(TEXT("height"), rc.bottom - rc.top);
+					setStoredValue(TEXT("show-maximized"), 0);
+				}
 			}
 
 			PostQuitMessage(0);
@@ -2427,6 +2441,151 @@ LRESULT CALLBACK cbNewAutoComplete(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lP
 	return CallWindowProc((WNDPROC)GetProp(hWnd, TEXT("WNDPROC")), hWnd, msg, wParam, lParam);
 }
 
+LRESULT CALLBACK cbNewColumns(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+	switch (msg) {
+		case WM_COMMAND: {
+			SendMessage(GetParent(hWnd), WM_COMMAND, wParam, lParam);
+		}
+		break;
+
+		case WM_SETFOCUS: {
+			BOOL isShift = HIWORD(GetKeyState(VK_SHIFT));
+			int colCount = PtrToInt(GetProp(GetParent(hWnd), TEXT("COLCOUNT")));
+			SetFocus(GetDlgItem(hWnd, IDC_DLG_EDIT + (isShift ? colCount - 1 : 0)));
+		}
+		break;
+
+		case WM_MOUSEWHEEL: {
+			SendMessage(hWnd, WM_VSCROLL, MAKEWPARAM(GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? SB_LINEUP: SB_LINEDOWN, 0), 0);
+			return 0;
+		}
+		break;
+
+		case WM_VSCROLL: {
+			WORD action = LOWORD(wParam);
+			int scrollY = PtrToInt(GetProp(hWnd, TEXT("SCROLLY")));
+
+			int pos = action == SB_THUMBPOSITION ? HIWORD(wParam) :
+				action == SB_THUMBTRACK ? HIWORD(wParam) :
+				action == SB_LINEDOWN ? scrollY + 30 :
+				action == SB_LINEUP ? scrollY - 30 :
+				action == SB_TOP ? 0 :
+				action == SB_BOTTOM ? 100 :
+				-1;
+
+			if (pos == -1)
+				return 0;
+
+			if (!(GetWindowLong(hWnd, GWL_STYLE) & WS_VSCROLL))
+				return 0;
+
+			int currPos = GetScrollPos(hWnd, SB_VERT);
+			SendMessage(hWnd, WM_SETREDRAW, FALSE, 0);
+
+			SCROLLINFO si = {0};
+			si.cbSize = sizeof(SCROLLINFO);
+			si.fMask = SIF_POS;
+			si.nPos = pos;
+			si.nTrackPos = 0;
+			SetScrollInfo(hWnd, SB_VERT, &si, TRUE);
+			GetScrollInfo(hWnd, SB_VERT, &si);
+			pos = si.nPos;
+			POINT p = {0, pos - scrollY};
+			HDC hdc = GetDC(hWnd);
+			LPtoDP(hdc, &p, 1);
+			ReleaseDC(hWnd, hdc);
+			ScrollWindow(hWnd, 0, -p.y, NULL, NULL);
+			SetProp(hWnd, TEXT("SCROLLY"), IntToPtr(pos));
+
+			SendMessage(hWnd, WM_SETREDRAW, TRUE, 0);
+			if (currPos != pos)
+				InvalidateRect(hWnd, NULL, TRUE);
+
+			return 0;
+		}
+		break;
+
+		case WM_ERASEBKGND: {
+			HDC hDC = (HDC)wParam;
+			RECT rc = {0};
+			GetClientRect(hWnd, &rc);
+			HBRUSH hBrush = CreateSolidBrush(GetSysColor(COLOR_BTNFACE));
+			FillRect(hDC, &rc, hBrush);
+			DeleteObject(hBrush);
+
+			return 1;
+		}
+		break;
+
+		case WM_CTLCOLOREDIT: {
+			HWND hMainWnd = (HWND)GetWindowLongPtr(GetParent(hWnd), GWLP_USERDATA);
+			BOOL isDark = *(int*)GetProp(hMainWnd, TEXT("DARKTHEME"));
+			if (!isDark)
+				return 0;
+
+			SetBkColor((HDC)wParam, *(int*)GetProp(hMainWnd, TEXT("FILTERBACKCOLOR")));
+			SetTextColor((HDC)wParam, *(int*)GetProp(hMainWnd, TEXT("FILTERTEXTCOLOR")));
+			return (INT_PTR)(HBRUSH)GetProp(hMainWnd, TEXT("FILTERBACKBRUSH"));
+		}
+		break;
+
+		case WMU_SET_SCROLL_HEIGHT: {
+			RECT rc = {0};
+			GetWindowRect(hWnd, &rc);
+
+			SCROLLINFO si = {0};
+			si.cbSize = sizeof(SCROLLINFO);
+			si.fMask = SIF_ALL;
+			si.nMin = 0;
+			si.nMax = wParam;
+			si.nPage = rc.bottom - rc.top;
+			si.nPos = 0;
+			si.nTrackPos = 0;
+			SetScrollInfo(hWnd, SB_VERT, &si, TRUE);
+
+			SetProp(hWnd, TEXT("SCROLLHEIGHT"), IntToPtr((int)wParam));
+		}
+		break;
+
+		case WMU_UPDATE_SCROLL_POS: {
+			int colNo = GetDlgCtrlID(GetFocus()) - IDC_DLG_EDIT;
+			int lineHeight = PtrToInt(GetProp(hWnd, TEXT("LINEHEIGHT")));
+			int H = 2 + (colNo + 1) * lineHeight;
+
+			RECT rc;
+			GetClientRect(hWnd, &rc);
+			int h = rc.bottom;
+
+			SendMessage(hWnd, WM_VSCROLL, MAKEWPARAM(SB_THUMBPOSITION, MAX(0, H - h)), 0);
+			InvalidateRect(hWnd, NULL, TRUE);
+		}
+		break;
+
+		case WM_SIZE: {
+			int H = HIWORD(lParam);
+			int maxH = PtrToInt(GetProp(hWnd, TEXT("SCROLLHEIGHT")));
+
+			if (H > maxH) {
+				SendMessage(hWnd, WM_VSCROLL, SB_TOP, 0);
+				SetProp(hWnd, TEXT("SCROLLY"), 0);
+			}
+			SendMessage(hWnd, WMU_SET_SCROLL_HEIGHT, maxH, 0);
+			SendMessage(hWnd, WMU_UPDATE_SCROLL_POS, 0, 0);
+			ShowScrollBar(hWnd, SB_VERT, H < maxH);
+		}
+		break;
+
+		case WM_DESTROY: {
+			RemoveProp(hWnd, TEXT("LINEHEIGHT"));
+			RemoveProp(hWnd, TEXT("SCROLLHEIGHT"));
+			RemoveProp(hWnd, TEXT("SCROLLY"));
+		}
+		break;
+	}
+
+	return CallWindowProc(DefWindowProc, hWnd, msg, wParam, lParam);
+}
+
 LRESULT CALLBACK cbNewAddRowEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 	if (cbNewAutoCompleteEdit(hWnd, msg, wParam, lParam))
 		return TRUE;
@@ -2438,14 +2597,24 @@ LRESULT CALLBACK cbNewAddRowEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 		BOOL isShift = HIWORD(GetKeyState(VK_SHIFT));
 
 		int idc = GetDlgCtrlID(hWnd);
-		HWND hDlgWnd = GetParent(hWnd);
-		HWND hNextWnd = GetDlgItem(hDlgWnd, idc + (isShift ? -1: 1));
-		SetFocus(hNextWnd ? hNextWnd : GetDlgItem(hDlgWnd, IDC_DLG_OK));
+		HWND hColumnsWnd = GetParent(hWnd);
+		HWND hNextWnd = GetDlgItem(hColumnsWnd, idc + (isShift ? -1: 1));
+		SetFocus(hNextWnd ? hNextWnd : GetDlgItem(GetParent(hColumnsWnd), IDC_DLG_OK));
 		return TRUE;
 	}
 
 	if (msg == WM_CHAR && wParam == VK_TAB)
 		return FALSE;
+
+	if (msg == WM_SETFOCUS) {
+		RECT rc;
+		GetWindowRect(hWnd, &rc);
+		BOOL isTopVisible = WindowFromPoint((POINT){rc.left + 1, rc.top + 1}) == hWnd;
+		BOOL isBottomVisible = WindowFromPoint((POINT){rc.left + 1, rc.bottom - 1}) == hWnd;
+
+		if (!IsWindowVisible(hWnd) || !isTopVisible || !isBottomVisible)
+			SendMessage(GetParent(hWnd), WMU_UPDATE_SCROLL_POS, 0, 0);
+	}
 
 	return CallWindowProc((WNDPROC)GetProp(hWnd, TEXT("WNDPROC")), hWnd, msg, wParam, lParam);
 }
@@ -2455,7 +2624,7 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 	switch (msg) {
 		case WM_INITDIALOG: {
 			SetWindowLongPtr(hWnd, GWLP_USERDATA, lParam);
-			SetWindowLongPtr(hWnd, GWL_STYLE, WS_POPUP | WS_VISIBLE | WS_CAPTION | WS_SYSMENU);
+			SetWindowLongPtr(hWnd, GWL_STYLE, WS_POPUP | WS_OVERLAPPEDWINDOW | WS_VISIBLE);
 			SetWindowLongPtr(hWnd, GWL_EXSTYLE, WS_EX_DLGMODALFRAME);
 			SetWindowText(hWnd, TEXT("Add row"));
 
@@ -2463,18 +2632,24 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 			HWND hGridWnd = GetDlgItem(hMainWnd, IDC_GRID);
 			HWND hHeader = ListView_GetHeader(hGridWnd);
 			int colCount = Header_GetItemCount(hHeader);
+			SetProp(hWnd, TEXT("COLCOUNT"), IntToPtr(colCount));
 
 			float z = (getFontHeight(hMainWnd)) / 15.;
-
 			int w = 120 * z;
 			int h = 20 * z;
+
+			HWND hColumnsWnd = CreateWindow(WC_STATIC, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP, 0, 10, 0, 0, hWnd, (HMENU)IDC_DLG_COLUMNS, GetModuleHandle(0), 0);
+			SetWindowLongPtr(hColumnsWnd, GWLP_WNDPROC, (LONG_PTR)&cbNewColumns);
+			SendMessage(hColumnsWnd, WMU_SET_SCROLL_HEIGHT, colCount * h, 0);
+			SetProp(hColumnsWnd, TEXT("LINEHEIGHT"), IntToPtr(h));
+
 			for (int colNo = 0; colNo < colCount; colNo++) {
 				TCHAR colName16[256];
 				Header_GetItemText(hHeader, colNo, colName16, 255);
 				CreateWindow(WC_STATIC, colName16, WS_VISIBLE | WS_CHILD | SS_WORDELLIPSIS | SS_RIGHT,
-					5, 10 + colNo * h, w - 5, h, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL + colNo), GetModuleHandle(0), 0);
+					5, colNo * h, w - 5, h, hColumnsWnd, (HMENU)IntToPtr(IDC_DLG_LABEL + colNo), GetModuleHandle(0), 0);
 				HWND hEdit = CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL,
-					w + 5 * z, 10 + colNo * h - 2, 205 * z, h - 1, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + colNo), GetModuleHandle(0), 0);
+					w + 5 * z, 2 + colNo * h - 2, 0, 0, hColumnsWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + colNo), GetModuleHandle(0), 0);
 				SetProp(hEdit, TEXT("WNDPROC"), (HANDLE)SetWindowLongPtr(hEdit, GWLP_WNDPROC, (LONG_PTR)&cbNewAddRowEdit));
 				SetProp(hEdit, TEXT("AUTOCOMPLETE"), (HWND)GetProp((HWND)lParam, TEXT("AUTOCOMPLETE")));
 				SetProp(hEdit, TEXT("COLNO"), (HANDLE)(LONG_PTR)colNo);
@@ -2491,7 +2666,7 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 				while (SQLITE_ROW == sqlite3_step(stmt)) {
 					TCHAR* defValue = utf8to16((const char*)sqlite3_column_text(stmt, 0));
 					if (_tcslen(defValue))
-						Edit_SetCueBannerText(GetDlgItem(hWnd, IDC_DLG_EDIT + colNo), defValue);
+						Edit_SetCueBannerText(GetDlgItem(hColumnsWnd, IDC_DLG_EDIT + colNo), defValue);
 					free(defValue);
 
 					colNo++;
@@ -2499,14 +2674,54 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 			}
 			sqlite3_finalize(stmt);
 
-			RECT rc;
-			GetWindowRect(hGridWnd, &rc);
-			SetWindowPos(hWnd, 0, rc.left + 50, rc.top + 50, 340 * z, GetSystemMetrics(SM_CYCAPTION) + 2 * GetSystemMetrics(SM_CYBORDER) + colCount * h + 40 * z , SWP_NOZORDER);
-
-			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 250 * z, colCount * h + 10 * z, 80 * z, 22 * z, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
+			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 0, 0, 80 * z, 22 * z, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
 
 			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetProp(hMainWnd, TEXT("FONT")));
+
+			RECT rc;
+			GetWindowRect(hGridWnd, &rc);
+			SetWindowPos(hWnd, 0,
+					rc.left + 50, rc.top + 50, 340 * z,
+					MIN(GetSystemMetrics(SM_CYCAPTION) + 2 * GetSystemMetrics(SM_CYBORDER) + colCount * h + 40 * z + 10, rc.bottom - rc.top), SWP_NOZORDER);
+
+			GetClientRect(hWnd, &rc);
+			BOOL isMaximized = getStoredValue(TEXT("show-row-maximized"), 0);
+			SendMessage(hWnd, WM_SIZE, isMaximized ? SIZE_MAXIMIZED : SIZE_RESTORED, MAKELPARAM(rc.right, rc.bottom));
+			ShowWindow(hWnd, isMaximized ? SW_MAXIMIZE : SW_NORMAL);
+
+			PostMessage(GetDlgItem(hColumnsWnd, IDC_DLG_EDIT), WM_SETFOCUS, 0, 0);
+		}
+		break;
+
+		case WM_GETMINMAXINFO: {
+			LPMINMAXINFO lpMMI = (LPMINMAXINFO)lParam;
+			lpMMI->ptMinTrackSize.x = 200;
+			lpMMI->ptMinTrackSize.y = 100;
+		}
+		break;
+
+		case WM_SIZE: {
+			HWND hMainWnd = (HWND)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+			HWND hColumnsWnd = GetDlgItem(hWnd, IDC_DLG_COLUMNS);
+			int colCount = PtrToInt(GetProp(hWnd, TEXT("COLCOUNT")));
+			int W = (int)LOWORD(lParam);
+			int H = (int)HIWORD(lParam);
+			float z = (getFontHeight(hMainWnd)) / 15.;
+
+			SetWindowPos(GetDlgItem(hWnd, IDC_DLG_COLUMNS), 0, 0, 0, W, H - 32 * z - 10, SWP_NOMOVE | SWP_NOZORDER);
+			SetWindowPos(GetDlgItem(hWnd, IDC_DLG_OK), 0, W - 85 * z, H - 27 * z, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+
+			RECT rc;
+			GetClientRect(hColumnsWnd, &rc);
+			for (int colNo = 0; colNo < colCount; colNo++)
+				SetWindowPos(GetDlgItem(hColumnsWnd, IDC_DLG_EDIT + colNo), 0, 0, 0, rc.right - 125 * z - 5 * z, 20 * z - 1, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+
 			InvalidateRect(hWnd, NULL, TRUE);
+		}
+		break;
+
+		case WM_MOUSEWHEEL: {
+			return SendMessage(GetDlgItem(hWnd, IDC_DLG_COLUMNS), WM_MOUSEWHEEL, wParam, lParam);
 		}
 		break;
 
@@ -2520,17 +2735,18 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 				HWND hGridWnd = GetDlgItem(hMainWnd, IDC_GRID);
 				HWND hHeader = ListView_GetHeader(hGridWnd);
 				int colCount = Header_GetItemCount(hHeader);
+				HWND hColumnsWnd = GetDlgItem(hWnd, IDC_DLG_COLUMNS);
 
 				int len = 128;
 				for (int colNo = 0; colNo < colCount; colNo++)
-					len += GetWindowTextLength(GetDlgItem(hWnd, IDC_DLG_LABEL + colNo)) + GetWindowTextLength(GetDlgItem(hWnd, IDC_DLG_EDIT + colNo)) + 10;
+					len += GetWindowTextLength(GetDlgItem(hColumnsWnd, IDC_DLG_LABEL + colNo)) + GetWindowTextLength(GetDlgItem(hColumnsWnd, IDC_DLG_EDIT + colNo)) + 10;
 
 				char* query8 = (char*)calloc(len, sizeof(char));
 				sprintf(query8, "insert into \"%s\" (", tablename8);
 
 				int valCount = 0;
 				for (int colNo = 0; colNo < colCount; colNo++) {
-					if (!GetWindowTextLength(GetDlgItem(hWnd, IDC_DLG_EDIT + colNo)))
+					if (!GetWindowTextLength(GetDlgItem(hColumnsWnd, IDC_DLG_EDIT + colNo)))
 						continue;
 
 					TCHAR colName16[255];
@@ -2546,9 +2762,9 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 
 				valCount = 0;
 				for (int colNo = 0; colNo < colCount; colNo++) {
-					int len = GetWindowTextLength(GetDlgItem(hWnd, IDC_DLG_EDIT + colNo)) + 1;
+					int len = GetWindowTextLength(GetDlgItem(hColumnsWnd, IDC_DLG_EDIT + colNo)) + 1;
 					TCHAR value16[len + 1];
-					GetWindowText(GetDlgItem(hWnd, IDC_DLG_EDIT + colNo), value16, len);
+					GetWindowText(GetDlgItem(hColumnsWnd, IDC_DLG_EDIT + colNo), value16, len);
 
 					if (!_tcslen(value16))
 						continue;
@@ -2586,6 +2802,15 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 				}
 			}
 
+			if (cmd == IDCANCEL || cmd == IDOK) {
+				RemoveProp(hWnd, TEXT("COLCOUNT"));
+
+				WINDOWPLACEMENT wp = {};
+				wp.length = sizeof(WINDOWPLACEMENT);
+				GetWindowPlacement(hWnd, &wp);
+				setStoredValue(TEXT("show-row-maximized"), wp.showCmd == SW_SHOWMAXIMIZED);
+			}
+
 			if (cmd == IDCANCEL) {
 				HWND hMainWnd = (HWND)GetWindowLongPtr(hWnd, GWLP_USERDATA);
 				HWND hAutoComplete = (HWND)GetProp(hMainWnd, TEXT("AUTOCOMPLETE"));
@@ -2601,11 +2826,6 @@ INT_PTR CALLBACK cbDlgAddRow(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 			if (HIWORD(wParam) == EN_CHANGE && cmd >= IDC_DLG_EDIT && cmd < IDC_DLG_EDIT + 100) {
 				SendMessage((HWND)lParam, WMU_AUTOCOMPLETE, 0, 0);
 			}
-		}
-		break;
-
-		case WM_CLOSE: {
-			EndDialog(hWnd, IDCANCEL);
 		}
 		break;
 	}
@@ -2634,7 +2854,7 @@ INT_PTR CALLBACK cbDlgAddTable(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			CreateWindow(WC_STATIC, TEXT("Column names separated by commas"), WS_VISIBLE | WS_CHILD,
 				10 * z, 55 * z, 300 * z, 16 * z, hWnd, (HMENU)IntToPtr(IDC_DLG_LABEL), GetModuleHandle(0), 0);
 
-			CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOHSCROLL,
+			CreateWindow(WC_EDIT, NULL, WS_VISIBLE | WS_CHILD | WS_TABSTOP | WS_BORDER | WS_CLIPSIBLINGS | ES_AUTOVSCROLL | ES_MULTILINE,
 				10 * z, 72 * z, 300 * z, 50 * z, hWnd, (HMENU)IntToPtr(IDC_DLG_EDIT + 1), GetModuleHandle(0), 0);
 
 			CreateWindow(WC_BUTTON, TEXT("OK"), WS_VISIBLE | WS_CHILD | WS_TABSTOP, 240 * z, 130 * z, 70 * z, 22 * z, hWnd, (HMENU)IDC_DLG_OK, GetModuleHandle(0), 0);
@@ -2645,6 +2865,18 @@ INT_PTR CALLBACK cbDlgAddTable(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 			EnumChildWindows(hWnd, (WNDENUMPROC)cbEnumSetFont, (LPARAM)(HFONT)GetProp(hMainWnd, TEXT("FONT")));
 			InvalidateRect(hWnd, NULL, TRUE);
+		}
+		break;
+
+		case WM_CTLCOLOREDIT: {
+			HWND hMainWnd = (HWND)GetWindowLongPtr(hWnd, GWLP_USERDATA);
+			BOOL isDark = *(int*)GetProp(hMainWnd, TEXT("DARKTHEME"));
+			if (!isDark)
+				return 0;
+
+			SetBkColor((HDC)wParam, *(int*)GetProp(hMainWnd, TEXT("FILTERBACKCOLOR")));
+			SetTextColor((HDC)wParam, *(int*)GetProp(hMainWnd, TEXT("FILTERTEXTCOLOR")));
+			return (INT_PTR)(HBRUSH)GetProp(hMainWnd, TEXT("FILTERBACKBRUSH"));
 		}
 		break;
 
