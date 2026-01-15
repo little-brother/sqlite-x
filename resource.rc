@@ -1,6 +1,145 @@
-#define IDI_LOGO 6000
-#define CREATEPROCESS_MANIFEST_RESOURCE_ID  1
-#define RT_MANIFEST  24
+#include <windows.h>
+#include <windowsx.h>
+#include "resource.h"
 
-IDI_LOGO ICON "logo.ico"
+IDI_ICON ICON "icon.ico"
 CREATEPROCESS_MANIFEST_RESOURCE_ID RT_MANIFEST "manifest.xml"
+
+LANGUAGE 0, SUBLANG_NEUTRAL
+IDD_TABLE DIALOGEX 50, 50, 300, 120
+	STYLE WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME
+	CAPTION "New table..."
+	FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+	LTEXT "Table name", IDC_DLG_LABEL, 10, 5, 280, 11, SS_LEFT
+	EDITTEXT IDC_DLG_TABLENAME, 10, 16, 280, 12, WS_TABSTOP
+	LTEXT "Column names separated by commas", IDC_DLG_LABEL, 10, 35, 280, 16, SS_LEFT
+	EDITTEXT IDC_DLG_COLUMNS, 10, 45, 280, 50, ES_MULTILINE | ES_WANTRETURN | ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_TABSTOP
+
+	PUSHBUTTON "OK", IDC_DLG_OK, 235, 100, 55, 14, WS_TABSTOP
+END
+
+LANGUAGE 0, SUBLANG_NEUTRAL
+IDD_ROW DIALOGEX 50, 50, 300, 120
+	STYLE WS_OVERLAPPEDWINDOW | DS_MODALFRAME
+	CAPTION "New row..."
+	FONT 8, "MS Shell Dlg", 400, 0, 0x1
+BEGIN
+	PUSHBUTTON "OK", IDC_DLG_OK, 235, 100, 55, 14, WS_TABSTOP
+END
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDC_MENU_MAIN MENU
+BEGIN
+	POPUP "Database"
+	BEGIN
+		MENUITEM "Open", IDM_OPEN_DB
+		MENUITEM SEPARATOR
+		MENUITEM "Exit", IDM_EXIT
+	END
+	POPUP "Settings"
+	BEGIN
+		MENUITEM "Dark theme\tCtrl+T", IDM_DARK_THEME
+		MENUITEM "Show filters\tCtrl+H", IDM_FILTER_ROW
+		MENUITEM "Show grid lines\tCtrl+L", IDM_GRID_LINES
+		MENUITEM "Show editor\tCrtl+E", IDM_EDITOR
+		MENUITEM SEPARATOR
+		MENUITEM "Auto filters", IDM_AUTOFILTERS
+		MENUITEM "Hide editor on save", IDM_EDITOR_AUTOHIDE
+		MENUITEM "Exit by Escape", IDM_ESCAPE_EXIT
+	END
+	POPUP "?"
+	BEGIN
+		MENUITEM "About", IDM_ABOUT
+		MENUITEM "Wiki", IDM_WIKI
+		MENUITEM "Homepage", IDM_HOMEPAGE
+	END
+END
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDC_MENU_LIST MENU
+BEGIN
+	POPUP "Table list menu"
+	BEGIN
+		MENUITEM "Delete\tDel", IDM_DROP_TABLE
+	END
+END
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDC_MENU_GRID MENU
+BEGIN
+	POPUP "Grid menu"
+	BEGIN
+		MENUITEM "Copy cell\tCtrl+C", IDM_COPY_CELL
+		MENUITEM "Copy row(s)\tShift+C", IDM_COPY_ROWS
+		MENUITEM "Copy column\tCtrl+Shift+C", IDM_COPY_COLUMN
+		MENUITEM "Paste cell\tCtrl+V", IDM_PASTE_CELL
+		MENUITEM "Save row(s) as ...\tCtrl+S", IDM_SAVE_AS
+		MENUITEM "", IDM_SEPARATOR1
+		MENUITEM "Add row\tIns", IDM_ADD_ROW
+		MENUITEM "Duplicate row(s)\tCtrl+D", IDM_DUPLICATE_ROWS
+		MENUITEM "Delete row(s)\tDel", IDM_DELETE_ROWS
+		MENUITEM SEPARATOR
+		MENUITEM "Hide column\tCtrl+H", IDM_HIDE_COLUMN
+	END
+END
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDC_MENU_BLOB MENU
+BEGIN
+	POPUP "BLOB menu"
+	BEGIN
+		MENUITEM "Save to file...", IDM_BLOB
+	END
+END
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDC_MENU_EDITOR MENU
+BEGIN
+	POPUP "Editor menu"
+	BEGIN
+		MENUITEM "Copy\tCtrl+C", IDM_EDITOR_COPY
+		MENUITEM "Paste\tCtrl+V", IDM_EDITOR_PASTE
+		MENUITEM "Save changes\tCtrl+S", IDM_EDITOR_SAVE
+		MENUITEM SEPARATOR
+		MENUITEM "Word wrap\tCtrl+W", IDM_EDITOR_WORDWRAP
+	END
+END
+
+IDA_ACCEL ACCELERATORS
+BEGIN
+	VK_ESCAPE, IDM_EXIT, VIRTKEY
+	VK_TAB, IDM_NEXT_CONTROL, VIRTKEY
+	VK_TAB, IDM_PREV_CONTROL, CONTROL, VIRTKEY
+	"T", IDM_DARK_THEME, CONTROL, VIRTKEY
+	"H", IDM_FILTER_ROW, CONTROL, VIRTKEY
+	"F", IDM_SEARCH, CONTROL, VIRTKEY
+	"L", IDM_GRID_LINES, CONTROL, VIRTKEY
+	"E", IDM_EDITOR, CONTROL, VIRTKEY
+END
+
+STRINGTABLE
+BEGIN
+	IDS_ABOUT "GUI version: %ls\nArchitecture: %ls\nSQLite version: %hs\nBuild date: %ls\n\nOS: %i.%i.%i %ls %ls"
+	IDS_NO_DATABASE "sqlite-x - No database selected"
+	IDS_CONFIRMATION "Confirmation"
+	IDS_DROP_TABLE "Are you sure you want to delete ""%ls?"""
+	IDS_DELETE_JOURNAL "Delete journal files?"
+	IDS_OVERWRITE_FILE "Overwrite file ""%ls""?"
+	IDS_SQLITE_FILTERS "Databases (*.sqlite, *.sqlite3, *.db, *.db3)\0*.sqlite;*.sqlite3;*.db;*.db3\0All\0*.*\0"
+	IDS_BLOB_FILTERS "Images (*.jpg, *.gif, *.png, *.bmp)\0*.jpg;*.jpeg;*.gif;*.png;*.bmp\0Binary(*.bin,*.dat)\0*.bin,*.dat\0All\0*.*\0"
+	IDS_SB_TABLE_COUNT " Tables: %i"
+	IDS_SB_VIEW_COUNT " Views: %i"
+	IDS_SB_TABLE " TABLE"
+	IDS_SB_VIEW " VIEW"
+	IDS_SB_ROWS " Rows: %i/%i"
+	IDS_ERR_DB_OPEN "Error to open database ""%ls"""
+	IDS_ERR_FILE_OPEN "Can't open file ""%ls"""
+	IDS_ERR_FILE_WRITE "Can't write to file ""%ls"""
+	IDS_ERR_NO_TABLENAME "Table name is empty"
+	IDS_ERR_NO_COLUMNS "You should provide at least one column name"
+	IDS_ERR_NO_ROWID "The table doesn't have a rowid.\nBlob saving is not supported."
+	IDS_ERR_CACHE_LIMIT "The operation is available only for full-cached resultset.\nThis resultset has %i rows and a cache size is %i.\nCheck Wiki to learn how to increase the cache size."
+	IDS_ERR_EDIT_LIMIT "The value has %i chars and it`s too long.\nThe value was trimmed to %i chars.\nYou can increate the limit in sqlite-x.ini."
+	IDS_ERR_ALL_COLUMNS_PK "All columns are primary keys. Rows duplication is impossible."
+END
