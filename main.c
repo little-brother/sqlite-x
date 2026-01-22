@@ -94,7 +94,7 @@ int storedValues[] = {
 	11, 0, 0, 0, 300, 0, 1,
 	0, 0, 0, 1, 0,
 	10000, 1000, 0, 0, 2000,
-	64, 64000, 1, 1, 1,
+	64, 64000, 0, 1, 1,
 	1,
 
 	0, 16777215, 15790320, 0, 15790320,
@@ -180,10 +180,11 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	SetProp(hGridWnd, TEXT("CELLBUFFER16"), (HANDLE)calloc(CELL_BUFFER_LENGTH + 1, sizeof(TCHAR)));
 
 	LoadLibrary(TEXT("msftedit.dll"));
-	HWND hEditorWnd = CreateWindow(TEXT("RICHEDIT50W"), NULL, WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | ES_NOHIDESEL | (getStoredValue("editor-word-wrap") ? 0 : ES_AUTOHSCROLL) | WS_HSCROLL | WS_TABSTOP,
+	HWND hEditorWnd = CreateWindow(TEXT("RICHEDIT50W"), NULL, WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL | ES_WANTRETURN | WS_VSCROLL | ES_NOHIDESEL | WS_HSCROLL | WS_TABSTOP,
 		0, 0, 100, 100, hWnd, (HMENU)IDC_EDITOR, hInstance, NULL);
 	SetProp(hEditorWnd, TEXT("WNDPROC"), (HANDLE)SetWindowLongPtr(hEditorWnd, GWLP_WNDPROC, (LONG_PTR)cbNewEditor));
 	SendMessage(hEditorWnd, EM_SETEVENTMASK, 0, ENM_CHANGE);
+	SendMessage(hEditorWnd, EM_SETTARGETDEVICE,(WPARAM)NULL, (LPARAM)!getStoredValue("editor-word-wrap"));
 
 	HWND hCellEdit = CreateWindowEx(0, WC_EDIT, NULL, WS_CHILD | WS_BORDER | ES_AUTOHSCROLL, 0, 0, 0, 0, hGridWnd, (HMENU)IDC_CELL_EDIT, GetModuleHandle(NULL), NULL);
 	SetProp(hCellEdit, TEXT("WNDPROC"), (HANDLE)SetWindowLongPtr(hCellEdit, GWLP_WNDPROC, (LONG_PTR)&cbNewCellEdit));
@@ -191,7 +192,6 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	hAutoComplete = CreateWindowEx(WS_EX_TOPMOST, WC_LISTBOX, NULL, WS_POPUP | WS_BORDER | WS_VSCROLL, 0, 0, 170, 200, hWnd, (HMENU)0, hInstance, NULL);
 	SetProp(hAutoComplete, TEXT("WNDPROC"), (HANDLE)SetWindowLongPtr(hAutoComplete, GWLP_WNDPROC, (LONG_PTR)&cbNewAutoComplete));
 	SetProp(hAutoComplete, TEXT("CURRENTINPUT"), 0);
-
 
 	HWND hHeader = ListView_GetHeader(hGridWnd);
 	LONG_PTR styles = GetWindowLongPtr(hHeader, GWL_STYLE);
@@ -227,8 +227,7 @@ int WINAPI WinMain (HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLin
 	if (nArgs > 1) {
 		TCHAR path16[MAX_PATH + 1] = {0};
 		_tcsncpy(path16, args[1], MAX_PATH);
-		if (!SendMessage(hWnd, WMU_OPEN_DB, (WPARAM)path16, 0))
-			return 0;
+		SendMessage(hWnd, WMU_OPEN_DB, (WPARAM)path16, 0);
 	}
 
 	SetWindowPos(hWnd, 0,
@@ -1025,6 +1024,8 @@ LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 			ListBox_SetCurSel(hListWnd, 0);
 			SendMessage(hWnd, WM_COMMAND, MAKELPARAM(IDC_TABLELIST, LBN_SELCHANGE), (LPARAM)hListWnd);
 			InvalidateRect(hWnd, NULL, TRUE);
+
+			return TRUE;
 		}
 		break;
 
@@ -3236,7 +3237,7 @@ void bindFilterValues(HWND hHeader, sqlite3_stmt* stmt) {
 	for (int colNo = 0; colNo < colCount; colNo++) {
 		HWND hEdit = GetDlgItem(hHeader, IDC_HEADER_EDIT + colNo);
 		int size = GetWindowTextLength(hEdit);
-		if (size == 0) 
+		if (size == 0)
 			continue;
 
 		TCHAR value16[size + 1];

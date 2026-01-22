@@ -127,7 +127,7 @@
 
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("1.2.0")
+#define APP_VERSION            TEXT("1.2.1")
 #define WND_CLASS              TEXT("sqlite-x-class")
 #ifdef __MINGW64__
 #define APP_PLATFORM           64
