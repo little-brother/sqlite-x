@@ -33,7 +33,7 @@ IDC_MENU_MAIN MENU
 BEGIN
 	POPUP "Database"
 	BEGIN
-		MENUITEM "Open", IDM_OPEN_DB
+		MENUITEM "New / Open", IDM_OPEN_DB
 		MENUITEM SEPARATOR
 		MENUITEM "Exit", IDM_EXIT
 	END
@@ -126,8 +126,6 @@ BEGIN
 	IDS_DROP_TABLE "Are you sure you want to delete ""%ls?"""
 	IDS_DELETE_JOURNAL "Delete journal files?"
 	IDS_OVERWRITE_FILE "Overwrite file ""%ls""?"
-	IDS_SQLITE_FILTERS "Databases (*.sqlite, *.sqlite3, *.db, *.db3)\0*.sqlite;*.sqlite3;*.db;*.db3\0All\0*.*\0"
-	IDS_BLOB_FILTERS "Images (*.jpg, *.gif, *.png, *.bmp)\0*.jpg;*.jpeg;*.gif;*.png;*.bmp\0Binary(*.bin,*.dat)\0*.bin,*.dat\0All\0*.*\0"
 	IDS_SB_TABLE_COUNT " Tables: %i"
 	IDS_SB_VIEW_COUNT " Views: %i"
 	IDS_SB_TABLE " TABLE"
@@ -142,4 +140,14 @@ BEGIN
 	IDS_ERR_CACHE_LIMIT "The operation is available only for full-cached resultset.\nThis resultset has %i rows and a cache size is %i.\nCheck Wiki to learn how to increase the cache size."
 	IDS_ERR_EDIT_LIMIT "The value has %i chars and it`s too long.\nThe value was trimmed to %i chars.\nYou can increate the limit in sqlite-x.ini."
 	IDS_ERR_ALL_COLUMNS_PK "All columns are primary keys. Rows duplication is impossible."
+END
+
+IDR_SQLITE_FILTERS RCDATA
+BEGIN
+  TEXT("Databases (*.sqlite, *.sqlite3, *.db, *.db3)\0*.sqlite;*.sqlite3;*.db;*.db3\0All\0*.*\0\0")
+END
+
+IDR_BLOB_FILTERS RCDATA
+BEGIN
+  TEXT("Images (*.jpg, *.gif, *.png, *.bmp)\0*.jpg;*.jpeg;*.gif;*.png;*.bmp\0Binary(*.bin,*.dat)\0*.bin,*.dat\0All\0*.*\0\0")
 END

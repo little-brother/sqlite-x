@@ -61,11 +61,12 @@ void setClipboardText(const TCHAR* text);
 TCHAR* getClipboardText();
 int getFontHeight(HWND hWnd);
 int ListView_AddColumn(HWND hListWnd, TCHAR* colName, int fmt);
+void ListView_EnsureVisibleCell(HWND hWnd, int rowNo, int colNo);
 int Header_GetItemText(HWND hWnd, int i, TCHAR* pszText, int cchTextMax);
 void Menu_SetItemState(HMENU hMenu, UINT wID, UINT fState);
 BOOL saveFile(TCHAR* path, const TCHAR* filter, const TCHAR* defExt, HWND hWnd);
 TCHAR* loadString(UINT id, ...);
-void ListView_EnsureVisibleCell(HWND hWnd, int rowNo, int colNo);
+TCHAR* loadFilters(UINT id);
 
 static TCHAR iniPath[MAX_PATH] = {0};
 sqlite3 *db = 0;
@@ -525,7 +526,7 @@ LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
 			if (cmd == IDM_OPEN_DB) {
 				TCHAR path16[MAX_PATH];
-				TCHAR* filters16 = loadString(IDS_SQLITE_FILTERS);
+				TCHAR* filters16 = loadFilters(IDR_SQLITE_FILTERS);
 
 				OPENFILENAME ofn = {0};
 				ofn.lStructSize = sizeof(ofn);
@@ -708,6 +709,9 @@ LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 
 				SendMessage(hWnd, WM_SIZE, 0, 0);
 				SendMessage(hWnd, WMU_UPDATE_SETTINGS, 0, 0);
+
+				if (!db)
+					return TRUE;
 
 				HWND hGridWnd = GetDlgItem(hWnd, IDC_GRID);
 				if (isShowEditor) {
@@ -1443,7 +1447,7 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 					free(colName8);
 
 					TCHAR path16[MAX_PATH] = {0};
-					TCHAR* filters16 = loadString(IDS_BLOB_FILTERS);
+					TCHAR* filters16 = loadFilters(IDR_BLOB_FILTERS);
 					if (SQLITE_OK == sqlite3_prepare_v2(db, query8, -1, &stmt, 0) &&
 						SQLITE_ROW == sqlite3_step(stmt) &&
 						saveFile(path16, filters16, TEXT(""), hWnd)) {
@@ -1892,6 +1896,7 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 				SetWindowText(hEditorWnd, text16);
 
 			if (_tcscmp(text16, TEXT(BLOB_VALUE)) == 0) {
+				SetProp(hEditorWnd, TEXT("SID"), UIntToPtr(-1));
 				MessageBeep(0);
 				return 0;
 			}
@@ -3422,6 +3427,21 @@ int ListView_AddColumn(HWND hListWnd, TCHAR* colName, int fmt) {
 	return ListView_InsertColumn(hListWnd, colNo, &lvc);
 }
 
+void ListView_EnsureVisibleCell(HWND hWnd, int rowNo, int colNo) {
+	if (rowNo == -1 || colNo == -1)
+		return;
+
+	ListView_EnsureVisible(hWnd, rowNo, TRUE);
+
+	RECT rc, rcCell;
+	GetClientRect(hWnd, &rc);
+	ListView_GetSubItemRect(hWnd, rowNo, colNo, LVIR_BOUNDS, &rcCell);
+	if (rcCell.left <= rc.left || rcCell.right >= rc.right) {
+		int scrollX = rcCell.left <= rc.left ? rcCell.left - rc.left : rcCell.right >= rc.right ? rcCell.right - rc.right : 0;
+		ListView_Scroll(hWnd, scrollX, 0);
+	}
+}
+
 int Header_GetItemText(HWND hWnd, int i, TCHAR* pszText, int cchTextMax) {
 	if (i < 0)
 		return FALSE;
@@ -3527,17 +3547,19 @@ TCHAR* loadString(UINT id, ...) {
 	return result;
 }
 
-void ListView_EnsureVisibleCell(HWND hWnd, int rowNo, int colNo) {
-	if (rowNo == -1 || colNo == -1)
-		return;
+TCHAR* loadFilters(UINT id) {
+	HINSTANCE hInstance = GetModuleHandle(NULL);
+	HRSRC hRes = FindResource(hInstance, MAKEINTRESOURCE(id), RT_RCDATA);
+	HGLOBAL hData = LoadResource(hInstance, hRes);
+	DWORD size8 = SizeofResource(hInstance, hRes);
 
-	ListView_EnsureVisible(hWnd, rowNo, TRUE);
+	if (!hData || size8 == 0)
+		return (TCHAR*)calloc (1, sizeof (TCHAR));
 
-	RECT rc, rcCell;
-	GetClientRect(hWnd, &rc);
-	ListView_GetSubItemRect(hWnd, rowNo, colNo, LVIR_BOUNDS, &rcCell);
-	if (rcCell.left <= rc.left || rcCell.right >= rc.right) {
-		int scrollX = rcCell.left <= rc.left ? rcCell.left - rc.left : rcCell.right >= rc.right ? rcCell.right - rc.right : 0;
-		ListView_Scroll(hWnd, scrollX, 0);
-	}
+	char* res8 = (char*)LockResource(hData);
+	DWORD size16 = MultiByteToWideChar(CP_UTF8, 0, res8, size8, NULL, 0);
+	TCHAR* res16 = (TCHAR*)calloc (size16 + 1, sizeof (TCHAR));
+	MultiByteToWideChar(CP_UTF8, 0, res8, size8, res16, size16);
+
+	return res16;
 }

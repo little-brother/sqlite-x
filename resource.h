@@ -74,8 +74,6 @@
 #define IDS_DROP_TABLE         8004
 #define IDS_DELETE_JOURNAL     8005
 #define IDS_OVERWRITE_FILE     8006
-#define IDS_SQLITE_FILTERS     8010
-#define IDS_BLOB_FILTERS       8011
 #define IDS_SB_TABLE_COUNT     8041
 #define IDS_SB_VIEW_COUNT      8042
 #define IDS_SB_TABLE           8043
@@ -90,6 +88,9 @@
 #define IDS_ERR_CACHE_LIMIT    8063
 #define IDS_ERR_EDIT_LIMIT     8064
 #define IDS_ERR_ALL_COLUMNS_PK 8065
+
+#define IDR_SQLITE_FILTERS     9001
+#define IDR_BLOB_FILTERS       9002
 
 #define WMU_SET_SOURCE          WM_USER + 700
 #define WMU_UPDATE_DATA         WM_USER + 702
@@ -127,7 +128,7 @@
 
 
 #define APP_NAME               TEXT("sqlite-x")
-#define APP_VERSION            TEXT("1.2.1")
+#define APP_VERSION            TEXT("1.2.2")
 #define WND_CLASS              TEXT("sqlite-x-class")
 #ifdef __MINGW64__
 #define APP_PLATFORM           64
