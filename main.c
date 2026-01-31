@@ -814,7 +814,7 @@ LRESULT CALLBACK cbMainWnd(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
 					if (pItem->mask & LVIF_TEXT) {
 						TCHAR* value16 = (TCHAR*)SendMessage(hGridWnd, WMU_GET_CELL, pItem->iItem, pItem->iSubItem);
 
-						pItem->pszText = _tcslen(value16) > CELL_BUFFER_LENGTH ? _tcsncpy(GetProp(hGridWnd, TEXT("CELLBUFFER16")), value16, CELL_BUFFER_LENGTH) : value16;
+						pItem->pszText = value16 && _tcslen(value16) > CELL_BUFFER_LENGTH ? _tcsncpy(GetProp(hGridWnd, TEXT("CELLBUFFER16")), value16, CELL_BUFFER_LENGTH) : value16;
 					}
 				}
 
@@ -1810,6 +1810,10 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 		// wParam = rowNo, lParam = colNo
 		case WMU_SET_CURRENT_CELL: {
+			HWND hCellEdit = GetDlgItem(hWnd, IDC_CELL_EDIT);
+			if (IsWindowVisible(hCellEdit))
+				SendMessage(hCellEdit, WMU_UPDATE_CELL, 0, 0);
+
 			int rowNo = (int)wParam;
 			int colNo = (int)lParam;
 			HWND hHeader = ListView_GetHeader(hWnd);
@@ -1842,7 +1846,7 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 				if (rowNo == -1 || colNo == -1) {
 					SetWindowText(GetDlgItem(GetParent(hWnd), IDC_EDITOR), 0);
 				} else {
-					SendMessage(hWnd, WMU_EDIT_CELL, 2, 0);
+					SendMessage(hWnd, WMU_EDIT_CELL, 3, 0);
 				}
 			}
 
@@ -1864,7 +1868,8 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		// wParam:
 		// 0 - try to edit inside cell, don't keep the text, instead use editor
 		// 1 - edit inside cell, keep the text
-		// 2 - edit in the editor, keep the text
+		// 2 - edit in the editor, keep the text, select all
+		// 3 - edit in the editor, keep the text
 		// lParam = The kb key that caused the message
 		case WMU_EDIT_CELL: {
 			BOOL withText = wParam > 0;
@@ -1886,7 +1891,7 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			int cacheSize = getStoredValue("cache-size");
 			HWND hCellEdit = GetDlgItem(hWnd, IDC_CELL_EDIT);
 			HWND hEditorWnd = GetDlgItem(GetParent(hWnd), IDC_EDITOR);
-			BOOL isEditor = wParam > 1 || !isTable;
+			BOOL isEditor = wParam > 2 || !isTable;
 
 			if (rowNo == - 1 || rowNo < cacheOffset || rowNo >= cacheOffset + cacheSize)
 				return FALSE;
@@ -1920,13 +1925,8 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			}
 
 			HWND hEdit = isEditor ? hEditorWnd : hCellEdit;
-			if (withText) {
-				SetWindowText(hEdit, text16);
-				int pos = isEditor && wParam == 2 ? 0 : _tcslen(text16);
-				SendMessage(hEdit, EM_SETSEL, pos, pos);
-			} else {
-				SetWindowText(hEdit, NULL);
-			}
+			SetWindowText(hEdit, withText ? text16 : 0);
+			SendMessage(hEdit, EM_SETSEL, 0, 0);
 
 			DWORD sid = GetTickCount();
 			SetProp(hCellEdit, TEXT("SID"), UIntToPtr(sid));
@@ -1942,7 +1942,7 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 
 			ListView_EnsureVisibleCell(hWnd, rowNo, colNo);
 
-			if (isEditor && wParam < 2)
+			if (isEditor && wParam < 3)
 				SetFocus(hEdit);
 
 			if (isEditor)
@@ -1953,13 +1953,14 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 			int h = rc.bottom - rc.top;
 			int w = ListView_GetColumnWidth(hWnd, colNo);
 			SetWindowPos(hEdit, 0, rc.left, rc.top, w, h, 0);
-			SetProp(hEdit, TEXT("ISMOVENEXT"), IntToPtr(0));
 
 			ShowWindow(hEdit, SW_SHOW);
 			SetFocus(hEdit);
 
 			if (lParam && (lParam != VK_SPACE))
 				keybd_event(lParam, 0, 0, 0);
+
+			SendMessage(hEdit, EM_SETSEL, wParam == 2 ? 0 : _tcslen(text16), -1);
 		}
 		break;
 
@@ -2030,7 +2031,7 @@ LRESULT CALLBACK cbNewDataGrid(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 				ListView_SetItemState(hWnd, -1, 0, LVIS_SELECTED | LVIS_FOCUSED);
 				ListView_SetItemState(hWnd, nextRowNo, LVIS_SELECTED | LVIS_FOCUSED, LVIS_SELECTED | LVIS_FOCUSED);
 				PostMessage(hWnd, WMU_SET_CURRENT_CELL, nextRowNo, nextColNo);
-				PostMessage(hWnd, WMU_EDIT_CELL, 1, 0);
+				PostMessage(hWnd, WMU_EDIT_CELL, 2, 0);
 			}
 
 			if (rc && GetDlgCtrlID(hEdit) == IDC_EDITOR && getStoredValue("hide-editor-on-save"))
@@ -2668,14 +2669,18 @@ LRESULT CALLBACK cbNewCellEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 	switch (msg) {
 		case WM_KILLFOCUS: {
 			if ((HWND)wParam != hAutoComplete && IsWindowVisible(hWnd)) {
-				SendMessage(hWnd, WMU_UPDATE_CELL, 0, 0);
+				HANDLE isMoveNext = GetProp(hWnd, TEXT("ISMOVENEXT"));
+				RemoveProp(hWnd, TEXT("ISMOVENEXT"));
+				SendMessage(hWnd, WMU_UPDATE_CELL, (WPARAM)isMoveNext, 0);
 			}
 		}
 		break;
 
 		case WM_KEYDOWN: {
 			if (wParam == VK_RETURN || wParam == VK_TAB) {
-				SetProp(hWnd, TEXT("ISMOVENEXT"), IntToPtr(1));
+				BOOL isCtrl = HIWORD(GetKeyState(VK_CONTROL));
+				BOOL isMoveNext = wParam == VK_TAB && (isCtrl || !IsWindowVisible(hAutoComplete));
+				SetProp(hWnd, TEXT("ISMOVENEXT"), IntToPtr(isMoveNext));
 				SetFocus(GetParent(hWnd));
 				return TRUE;
 			}
@@ -2698,9 +2703,10 @@ LRESULT CALLBACK cbNewCellEdit(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam
 		}
 		break;
 
+		// wParam = is move next
 		case WMU_UPDATE_CELL: {
 			HWND hGridWnd = GetParent(hWnd);
-			if (SendMessage(hGridWnd, WMU_UPDATE_CELL, (WPARAM)GetProp(hWnd, TEXT("ISMOVENEXT")), (LPARAM)hWnd)) {
+			if (SendMessage(hGridWnd, WMU_UPDATE_CELL, wParam, (LPARAM)hWnd)) {
 				ShowWindow(hWnd, SW_HIDE);
 				SetFocus(hGridWnd);
 			}
